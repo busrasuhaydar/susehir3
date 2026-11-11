@@ -1380,12 +1380,8 @@ canvas{touch-action:none}
             const top = new THREE.Mesh(new THREE.SphereGeometry(SR, gq(128, 48), gq(64, 24), 0, Math.PI * 2, 0, Math.PI / 2), MAT.sphereMirror);
             const bot = new THREE.Mesh(new THREE.SphereGeometry(SR, gq(128, 48), gq(64, 24), 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), MAT.sphereGlass);
             bot.renderOrder = 6; LG.meshes.push(bot);
-            // ayna yarıda ince oyma çizgiler: kürenin kendi etrafında döndüğü bu çizgilerden okunur
-            const etch = new THREE.Group();
-            for (let k = 0; k < 8; k++) { const t = new THREE.Mesh(new THREE.TorusGeometry(SR * 1.001, 0.05, 6, 160, Math.PI / 2), MAT.champagne); t.rotation.set(0, k / 8 * Math.PI * 2, Math.PI / 2); etch.add(t); }
-            [0.35, 0.7].forEach(f => { const r = SR * Math.cos(Math.asin(f)); const t = new THREE.Mesh(new THREE.TorusGeometry(r * 1.001, 0.05, 6, 160), MAT.champagne); t.rotation.x = Math.PI / 2; t.position.y = SR * f; etch.add(t); });
-            const belt = new THREE.Mesh(new THREE.TorusGeometry(SR * 1.004, 0.32, 16, 220), MAT.champagne); belt.rotation.x = Math.PI / 2;
-            const spinner = new THREE.Group(); spinner.add(top, bot, etch, belt);
+            // v5 · koyu görünen oyma çizgiler ve kuşak kaldırıldı: küre artık saf ayna + saf sıvı cam
+            const spinner = new THREE.Group(); spinner.add(top, bot);
             const ring = new THREE.Mesh(new THREE.TorusGeometry(SR * 1.42, 0.55, 24, 240), MAT.ringGlass); ring.renderOrder = 6; LG.meshes.push(ring);
             const ringPivot = new THREE.Group(); ringPivot.rotation.set(0.32, 0, 0.18); ringPivot.add(ring);
             g.add(spinner, ringPivot); scene.add(g);
@@ -2912,6 +2908,7 @@ canvas{touch-action:none}
             mirror.rt.setSize(Math.max(16, Math.floor(window.innerWidth * pr * mirror.scale)), Math.max(16, Math.floor(window.innerHeight * pr * mirror.scale)));
         }
         const _mDir = new THREE.Vector3(), _mUp = new THREE.Vector3(), _mTarget = new THREE.Vector3();
+        const _mPlane = new THREE.Plane(), _mN = new THREE.Vector3(), _mClip = new THREE.Vector4(), _mQ = new THREE.Vector4();
         function renderMirror(cam) {
             cam = cam || camera;
             mirror.drawn = cam === camera;
@@ -2927,15 +2924,19 @@ canvas{touch-action:none}
             mc.updateProjectionMatrix(); mc.updateMatrixWorld();
             mirror.texMat.set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1)
                 .multiply(mc.projectionMatrix).multiply(mc.matrixWorldInverse);
+            // v5 · eğik yakın düzlem kırpması (su yüzeyi): kırpma düzlemi yerine izdüşüm matrisine gömülür → her malzemenin ikinci
+            // bir gölgelendirici sürümü derlenip her karede değiştirilmez (CPU tasarrufu); doku koordinatları değişmez.
+            { _mPlane.set(_mN.set(0, 1, 0), -WATER_Y + 0.15).applyMatrix4(mc.matrixWorldInverse);
+              const P = mc.projectionMatrix.elements, c = _mClip.set(_mPlane.normal.x, _mPlane.normal.y, _mPlane.normal.z, _mPlane.constant);
+              _mQ.set((Math.sign(c.x) + P[8]) / P[0], (Math.sign(c.y) + P[9]) / P[5], -1, (1 + P[10]) / P[14]);
+              c.multiplyScalar(2 / c.dot(_mQ)); P[2] = c.x; P[6] = c.y; P[10] = c.z + 1; P[14] = c.w;
+              mc.projectionMatrixInverse.copy(mc.projectionMatrix).invert(); }
             hiddenInMirror.forEach(o => o.visible = false);
             if (GOV.mirrorLite) MIRROR_LITE.forEach(o => { o.userData._mv = o.visible; o.visible = false; });
-            const prevClip = renderer.clippingPlanes;
-            renderer.clippingPlanes = mirror.clip;
             renderer.setRenderTarget(mirror.rt);
             renderer.clear();
             renderer.render(scene, mc);
             renderer.setRenderTarget(null);
-            renderer.clippingPlanes = prevClip;
             hiddenInMirror.forEach(o => o.visible = true);
             if (GOV.mirrorLite) MIRROR_LITE.forEach(o => { o.visible = o.userData._mv; });
         }
@@ -3446,6 +3447,7 @@ canvas{touch-action:none}
                     slot.perch.used = (slot.perch.used || 0) + 1;
                     perchPos(slot, tmpV); bird.position.set(tmpV.x, tmpV.y + b.foot, tmpV.z); bird.rotation.y = b.yaw0;
                     scene.add(bird); pigeons.push(b);
+                    hiddenInMirror.push(bird); hideInEnv.push(bird); // v5 · iskeletli güvercinler yansıma geçişlerinde iskelet yeniden hesabı yaptırmasın
                     if (gltf.animations && gltf.animations.length) {
                         const mixer = new THREE.AnimationMixer(bird);
                         gltf.animations.forEach(clip => { const a = mixer.clipAction(clip); a.play(); a.time = Math.random() * clip.duration; });
