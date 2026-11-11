@@ -2434,11 +2434,9 @@ canvas{touch-action:none}
                 float age = T.r, seed = T.g; vec2 disp = T.ba;
                 float hc = 0.0;
                 if (detail > 0.01) {
-                    vec2 dsp = disp * 0.3;
-                    vec2 P = vW.xz - dsp;
-                    float dl = length(dsp); vec2 dir = dl > 1e-3 ? dsp / dl : vec2(1.0, 0.0);
-                    float st = 1.0 + min(dl * 0.05, 0.6);
-                    vec2 Q = vec2(dot(P, dir) / st, dot(P, vec2(-dir.y, dir.x)));
+                    // hücreler dünya koordinatında sabit (boyaya yapışık durur, kaymaz); akış yönü yalnız hafif bir uzamada kullanılır
+                    float dl = length(disp); vec2 dir = dl > 1e-3 ? disp / dl : vec2(1.0, 0.0);
+                    vec2 Q = vW.xz;
                     float grow = 1.0 - exp(-age / 3.0);
                     float dens = 0.16 + 0.6 * smoothstep(0.04, 0.35, g);
                     // renk sınırlarında yumuşak mermer geçişi: komşu katmanın rengi ipeksi bantlar halinde içeri karışır (çizgi değil)
