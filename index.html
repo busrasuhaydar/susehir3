@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#05080e">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>Deniz Şehri</title>
+    <title>SU CITY · Deniz Şehri · v3</title>
     <style>
         html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
         canvas { display: block; touch-action: none; }
@@ -14,6 +14,7 @@
 #su-boot{position:fixed;inset:0;z-index:100;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:radial-gradient(circle at 50% 40%,#123247,#04080f 70%);color:#eef2f7;font:15px system-ui,-apple-system,sans-serif;transition:opacity .8s;padding:24px;text-align:center}
 #su-boot.out{opacity:0;pointer-events:none}
 #su-boot .b-title{font-size:30px;letter-spacing:.35em;font-weight:300}
+#su-boot .b-sub{color:#c9b98f;font-size:12.5px;letter-spacing:.22em;margin-top:-8px;font-style:italic}
 #su-boot .b-bar{width:min(320px,70vw);height:3px;border-radius:3px;background:rgba(255,255,255,.12);overflow:hidden}
 #su-boot .b-bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#e9c46a,#fff);transition:width .3s}
 #su-boot .b-txt{color:#9aa8ba;font-size:13px;max-width:90vw}
@@ -44,13 +45,43 @@ canvas{touch-action:none}
         // Cihaz sınıfı: telefon / tablet (iPadOS dahil, kendini Mac olarak tanıtsa da) ve "güvenli mod" (önceki açılışta grafik belleği
         // tükendiyse bir sonraki açılış otomatik olarak daha hafif ayarlarla başlar; sayfa kapanıp yeniden açılma döngüsü olmaz).
         const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1) || (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 1100);
-        const SAFE_MODE = (() => { try { return sessionStorage.getItem('sucity.safe') === '1'; } catch (e) { return false; } })();
-        const LOW_MEM = SAFE_MODE || (navigator.deviceMemory && navigator.deviceMemory <= 3);
-        // eser dokularının bellekteki en büyük kenarı (inceleme sırasında seçili binanın eseri tam çözünürlüğe yükseltilir)
-        const ART_MAX = SAFE_MODE ? 320 : IS_MOBILE ? (LOW_MEM ? 384 : 512) : 2048;
+        // v3 · KADEMELİ GÜVENLİ MOD: 0 = normal, 1 = bir kademe hafif (bir kez grafik belleği tükendi), 2 = güvenli mod.
+        const SAFE_LEVEL = (() => { try { return Math.max(0, Math.min(2, parseInt(sessionStorage.getItem('sucity.safe') || '0', 10) || 0)); } catch (e) { return 0; } })();
+        const SAFE_MODE = SAFE_LEVEL >= 2;
+        // v3 · CİHAZ KADEMESİ (0 zayıf telefon · 1 orta telefon · 2 güçlü telefon / zayıf masaüstü · 3 masaüstü).
+        // deviceMemory + hardwareConcurrency + GPU adı + ekran; bu cihazda daha önce oturmuş kademe varsa oradan başlanır.
+        const Q = (() => {
+            const mem = navigator.deviceMemory || (IS_MOBILE ? 4 : 8), cores = navigator.hardwareConcurrency || 4;
+            let gpu = '';
+            try { const c = document.createElement('canvas'), gl = c.getContext('webgl2') || c.getContext('webgl'); if (gl) { const ext = gl.getExtension('WEBGL_debug_renderer_info'); gpu = String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER) || ''); const lose = gl.getExtension('WEBGL_lose_context'); lose && lose.loseContext(); } } catch (e) {}
+            const weakGPU = /Mali-(4|T[678]|G3[1-9]|G5[12]|G6[0-9]\b)|Adreno \(TM\) ?[2-5]\d\d|PowerVR|SwiftShader|llvmpipe|Intel\(R\) (HD|UHD) Graphics [2-6]\d\d\b/i.test(gpu);
+            let tier = IS_MOBILE ? ((mem <= 3 || cores <= 4 || weakGPU) ? 0 : (mem >= 6 && cores >= 8) ? 2 : 1) : ((mem <= 4 || cores <= 4 || weakGPU) ? 2 : 3);
+            const sig = [navigator.userAgent, screen.width, screen.height, window.devicePixelRatio || 1].join('|');
+            let stored = null; try { stored = JSON.parse(localStorage.getItem('sucity.q.v3') || 'null'); } catch (e) {}
+            if (stored && stored.sig === sig && typeof stored.tier === 'number') tier = Math.min(tier, stored.tier);
+            tier = Math.max(0, tier - SAFE_LEVEL);
+            return { tier, boot: tier, mem, cores, gpu, weakGPU, sig };
+        })();
+        const LOW_MEM = SAFE_MODE || Q.tier === 0 || (navigator.deviceMemory && navigator.deviceMemory <= 3);
+        // eser dokularının bellekteki en büyük kenarı. Yalnız kameraya en yakın eserler tam çözünürlüğe akıtılır (masaüstünde de);
+        // incelenen binanın eseri orijinal çözünürlükte yüklenir. Renk ve kadraj asla değişmez, yalnız bellekteki boyut.
+        const ART_MAX = SAFE_MODE ? 320 : IS_MOBILE ? [384, 640, 768][Math.min(2, Q.tier)] : (Q.tier >= 3 ? 1024 : 768);
+        const ART_NEAR = SAFE_MODE ? 640 : IS_MOBILE ? [900, 1280, 1536][Math.min(2, Q.tier)] : (Q.tier >= 3 ? 2048 : 1536);
+        const ART_NEAR_K = SAFE_MODE ? 3 : IS_MOBILE ? [6, 12, 16][Math.min(2, Q.tier)] : (Q.tier >= 3 ? 28 : 18);
         if (IS_MOBILE) { FEATURES.refraction = false; if (LOW_MEM) { FEATURES.shadows = false; FEATURES.fish = false; } }
         if (SAFE_MODE) { FEATURES.shadows = false; FEATURES.fish = false; FEATURES.seagulls = false; }
-        const MAX_PR = SAFE_MODE ? 1 : IS_MOBILE ? (LOW_MEM ? 1.25 : 1.5) : 2;
+        const MAX_PR = SAFE_MODE ? 1 : IS_MOBILE ? [1.25, 1.5, 1.75][Math.min(2, Q.tier)] : 2;
+        // v3 · SU'rreal renk derecelendirmesi: ACES + çok hafif ayrık tonlama (gölgede derin çivit-petrol, ışıkta sıcak inci).
+        // Ton eşleme aşamasına gömülüdür → ek geçiş yok, telefonda bedava. Eserler toneMapped:false olduğu için ona hiç dokunmaz.
+        THREE.ShaderChunk.tonemapping_pars_fragment = THREE.ShaderChunk.tonemapping_pars_fragment.replace('vec3 CustomToneMapping( vec3 color ) { return color; }', `
+            vec3 CustomToneMapping( vec3 color ) {
+                vec3 c = ACESFilmicToneMapping( color );
+                float l = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
+                vec3 shadowTint = vec3( 0.93, 0.99, 1.07 ), lightTint = vec3( 1.035, 1.0, 0.955 );
+                c *= mix( shadowTint, lightTint, smoothstep( 0.08, 0.72, l ) );
+                c = mix( vec3( l ), c, 1.04 );
+                return clamp( c + vec3( 0.004, 0.006, 0.009 ) * ( 1.0 - l ), 0.0, 1.0 );
+            }`);
 
         // ===================== ORİJİNAL KONTROL DEĞİŞKENLERİ =====================
         let scene, camera, renderer, car, keys = {}, carSpeed = 0, maxSpeed = 0.8, acceleration = 0.02;
@@ -117,6 +148,9 @@ canvas{touch-action:none}
             const float Re = 6360.0; const float Ra = 6420.0;
             const vec3 bR = vec3(5.8e-3, 13.5e-3, 33.1e-3); const float bM = 21e-3;
             const float Hr = 7.994; const float Hm = 1.2; const float gM = 0.76;
+            // v3 · ozon (Chappuis bandı) soğurması: Rayleigh yoğunluğuna orantılı yaklaşım. Mavi saati gri değil derin çivit yapar,
+            // gün batımında ufku daha doygun turuncu-gül, tepeyi daha mavi tutar.
+            const vec3 bO = vec3(2.04e-3, 4.97e-3, 0.21e-3);
             vec2 raySph(vec3 ro, vec3 rd, float r){ float b = dot(ro, rd); float c = dot(ro, ro) - r*r; float d = b*b - c; if (d < 0.0) return vec2(1e9, -1e9); d = sqrt(d); return vec2(-b - d, -b + d); }
             vec3 atmosphere(vec3 rd, vec3 sd, float I){
                 vec3 ro = vec3(0.0, Re + 0.002, 0.0);
@@ -139,7 +173,7 @@ canvas{touch-action:none}
                         if (hh < 0.0) { lit = false; break; }
                         lR += exp(-hh / Hr) * dl; lM += exp(-hh / Hm) * dl;
                     }
-                    if (lit) { vec3 att = exp(-(bR * (odR + lR) + bM * 1.1 * (odM + lM))); sR += att * hr; sM += att * hm; }
+                    if (lit) { vec3 att = exp(-((bR + bO) * (odR + lR) + bM * 1.1 * (odM + lM))); sR += att * hr; sM += att * hm; }
                 }
                 return I * (sR * bR * pR + sM * bM * pM);
             }
@@ -227,7 +261,7 @@ canvas{touch-action:none}
         // Okyanus: Gerstner dalgaları + çok ölçekli ayrıntı + gerçek yansıma + derinlik tamponlu kırılma ve soğurma
         const OCEAN_VS = `
             uniform mat4 uTexMat; uniform float uTime; uniform float uWave;
-            varying vec4 vMirror; varying vec3 vWP; varying vec3 vGN; varying float vCrest;
+            varying vec4 vMirror; varying vec3 vWP; varying vec3 vGN; varying float vCrest; varying vec2 vDsp;
             void gerstner(vec2 dir, float L, float A, float Q, vec2 p, inout vec3 dsp, inout vec3 nrm, inout float crest){
                 vec2 d = normalize(dir); float k = 6.2831853 / L; float c = sqrt(9.8 / k);
                 float f = k * (dot(d, p) - c * uTime);
@@ -250,7 +284,7 @@ canvas{touch-action:none}
                 gerstner(vec2(-0.7, -0.4), 11.0, 0.065 * amp, 0.70, p, dsp, n, crest);
                 gerstner(vec2(0.2, -1.0), 6.3, 0.03 * amp, 0.70, p, dsp, n, crest);
                 wp.xyz += dsp;
-                vGN = normalize(n); vCrest = crest; vWP = wp.xyz;
+                vGN = normalize(n); vCrest = crest; vWP = wp.xyz; vDsp = dsp.xz;
                 vMirror = uTexMat * wp;
                 gl_Position = projectionMatrix * viewMatrix * wp;
             }`;
@@ -261,7 +295,7 @@ canvas{touch-action:none}
             uniform vec3 uSunDir; uniform vec3 uSunCol; uniform float uSunVis;
             uniform vec3 uDeep; uniform vec3 uShallow; uniform vec3 uScatter; uniform vec3 uFoamCol;
             uniform vec3 uFogColor; uniform float uFogDensity;
-            varying vec4 vMirror; varying vec3 vWP; varying vec3 vGN; varying float vCrest;
+            varying vec4 vMirror; varying vec3 vWP; varying vec3 vGN; varying float vCrest; varying vec2 vDsp;
             ${GLSL_NOISE}
             float viewZ(float d){ return uNear * uFar / ((uFar - uNear) * d - uFar); }
             vec3 tm(vec3 c){
@@ -279,6 +313,11 @@ canvas{touch-action:none}
                 vec3 toEye = cameraPosition - vWP; float dist = length(toEye); vec3 V = toEye / dist;
                 float farK = smoothstep(120.0, 2400.0, dist);
                 vec2 slope = (a.xy * 0.30 + b.xy * 0.19 + c.xy * 0.09 * (1.0 - farK)) * mix(1.0, 0.3, farK);
+                #if OCEAN_HQ > 0
+                    // yakında dördüncü, çok ince kırışıklık katmanı (yalnız güçlü cihazlarda)
+                    vec3 d4 = texture2D(uNormal, p * 0.19 + vec2(-t * 0.033, -t * 0.027)).xyz * 2.0 - 1.0;
+                    slope += d4.xy * 0.05 * (1.0 - smoothstep(30.0, 260.0, dist));
+                #endif
                 vec3 N = normalize(vec3(vGN.x + slope.x, vGN.y, vGN.z + slope.y));
                 float cosT = clamp(dot(N, V), 0.0, 1.0);
                 float F = 0.02 + 0.98 * pow(1.0 - cosT, 5.0);
@@ -290,13 +329,24 @@ canvas{touch-action:none}
                 vec3 H = normalize(L + V);
                 float nh = max(dot(N, H), 0.0);
                 vec3 spec = uSunCol * uSunVis * (pow(nh, mix(1400.0, 420.0, farK)) * 7.0 + pow(nh, 110.0) * 0.22);
-                float sss = pow(max(dot(V, -L), 0.0), 3.0) * clamp(vCrest * 9.0 + 0.15, 0.0, 1.0) * uSunVis;
+                #if OCEAN_HQ > 0
+                    // güneş pırıltısı: dalga yüzeyinde rastgele parlayan ışık kıvılcımları (altın saatte en güzel hâli)
+                    vec2 gc = floor(p * 1.7 + vec2(t * 0.6, -t * 0.4));
+                    float glit = step(0.985, qh(gc + floor(t * 3.0))) * pow(nh, 180.0) * (1.0 - smoothstep(60.0, 900.0, dist));
+                    spec += uSunCol * uSunVis * glit * 9.0;
+                #endif
+                // alt yüzey saçılımı: ışık dalga sırtının ince yerinden geçer (sırt yüksekliği + arkadan aydınlatma + normal sapması)
+                vec3 Lb = normalize(-L + N * 0.45);
+                float thin = clamp(vWP.y * 0.9 + 0.45, 0.0, 1.0);
+                float sss = (pow(max(dot(V, Lb), 0.0), 4.0) * 1.3 + 0.18 * pow(max(dot(V, -L), 0.0), 2.0)) * clamp(vCrest * 9.0 + 0.15, 0.0, 1.0) * mix(0.55, 1.25, thin) * uSunVis;
                 float patchN = qn(p * 0.0042 + 3.1) * 0.65 + qn(p * 0.013 - 1.7) * 0.35;
                 vec3 shallowC = mix(uShallow, uShallow * vec3(1.15, 0.92, 0.78), smoothstep(0.35, 0.8, qn(p * 0.0023 + 7.0)));
                 vec3 bodyLit = mix(shallowC, uDeep, openSea) * (0.82 + 0.36 * patchN) * (0.55 + 0.45 * cosT) + uScatter * sss;
-                float foamN = qn(p * 0.38 + vec2(t * 0.25, -t * 0.18)) * 0.6 + qn(p * 1.3 - vec2(t * 0.4, t * 0.3)) * 0.4;
+                // köpük taşınımı (advection): köpük deseni dalganın yatay hareketiyle birlikte sürüklenir, yerinde titremez
+                vec2 pa = p - vDsp * 1.6;
+                float foamN = qn(pa * 0.38 + vec2(t * 0.25, -t * 0.18)) * 0.6 + qn(pa * 1.3 - vec2(t * 0.4, t * 0.3)) * 0.4;
                 // dalga tepesi köpüğü: yalnız açık denizde, ince ve dağınık; uzaktan / tepeden bakınca leke oluşturmaz
-                float streak = qn(vec2(p.x * 0.9 + p.y * 0.3, p.y * 0.25 - p.x * 0.1) + vec2(t * 0.3, 0.0));
+                float streak = qn(vec2(pa.x * 0.9 + pa.y * 0.3, pa.y * 0.25 - pa.x * 0.1) + vec2(t * 0.3, 0.0));
                 float foam = smoothstep(0.11, 0.17, vCrest) * smoothstep(0.62, 0.88, foamN * 0.6 + streak * 0.4) * 0.45 * openSea * (1.0 - smoothstep(120.0, 700.0, dist));
                 vec3 col; float alpha = 1.0;
                 if (uRefr > 0.5) {
@@ -418,10 +468,78 @@ canvas{touch-action:none}
             uniform float uTime; uniform float uOpacity;
             varying vec3 vN; varying vec3 vV;
             void main(){
-                float f = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.2);
-                float flick = 0.85 + 0.15 * sin(uTime * 3.1 + vN.y * 6.0);
-                gl_FragColor = vec4(vec3(0.72, 0.88, 1.0) * f * flick, f * uOpacity);
+                // net bir cam-ışık kabuk: keskin parlak kenar + sakin, dolu bir iç (titreşimsiz, okunaklı siluet)
+                float e = 1.0 - abs(dot(normalize(vN), normalize(vV)));
+                float rim = smoothstep(0.45, 0.92, e);
+                float body = 0.32 + 0.04 * sin(uTime * 1.3);
+                float f = body + rim * 1.1;
+                gl_FragColor = vec4(mix(vec3(0.62, 0.84, 1.0), vec3(0.95, 0.99, 1.0), rim) * f, f * uOpacity);
             }`;
+
+        // ===================== v3 · ESER YÜZEYİ: kutsal renk + kenarda yaşayan ışık + uyanış =====================
+        // Kural: eserin yüzü (kameraya bakan kısmı) daima kendi gerçek renginde kalır. Eklenen her şey ışıktır ve TOPLAMSALDIR:
+        //  · cila (clearcoat): F0 = 0 Schlick → yalnız yüzeyin sıyırma açılarında canlı küp haritayı yansıtır, yüz değişmez
+        //  · ince film: yanardönerlik yalnız o kenar yansımasına uygulanır, eserin kendisine değil
+        //  · ıslaklık: su hattında gök yansıması ve güneş çizgisi; sudan yansıyan kostik ışık alt metrelerde dans eder
+        //  · uyanış: binanın durum dokusundan (keşif, seçki, ilerleme) okunan inci kenar ışığı, altın su ipliği,
+        //    bakıldıkça yükselen mürekkep-ışık ve keşif anında tabandan göğe yayılan alkol mürekkebi gibi bir ışık cephesi
+        const ART_VS_HEAD = 'attribute float aBid;\nvarying float vBid; varying vec3 vArtN;\n';
+        const ART_FS_HEAD = `
+            uniform sampler2D uState; uniform vec4 uAwk[4]; uniform float uArtFx; uniform samplerCube uEnvA;
+            uniform vec3 uSunA; uniform vec3 uSunColA; uniform float uSunUp; uniform float uNightA; uniform float uTimeA; uniform vec3 uCamA;
+            varying float vBid; varying vec3 vArtN;
+            ${GLSL_NOISE}
+            float artCaustic(vec2 p, float t){
+                vec2 q = p * 0.55;
+                float a = sin(q.x + sin(q.y * 1.3 + t)) + sin(q.y * 1.1 + sin(q.x * 0.9 - t * 1.2));
+                float b = sin((q.x + q.y) * 0.8 + sin(q.x * 1.7 + t * 0.8));
+                return pow(clamp(1.0 - abs(a * 0.5 + b * 0.5), 0.0, 1.0), 6.0);
+            }`;
+        const ART_FS_BODY = `
+            #ifdef ART_FX
+            if (uArtFx > 0.001) {
+                // tüm katkılar algısal (yaklaşık sRGB) uzayda toplanır: 0.05 gerçekten %5 demektir, koyu boyayı griye çekmez
+                vec4 st = texture2D(uState, vec2((vBid + 0.5) / 512.0, 0.5));
+                float disc = step(0.5, st.r), coll = step(0.5, st.g), Hb = max(st.b * 160.0, 6.0), prog = st.a;
+                vec3 Nw = normalize(vArtN), Vw = normalize(uCamA - vCutW);
+                float ndv = clamp(dot(Nw, Vw), 0.0, 1.0), rim = 1.0 - ndv, rim2 = rim * rim, rim4 = rim2 * rim2;
+                float edge = rim4 * rim;
+                vec3 env = textureCube(uEnvA, reflect(-Vw, Nw)).rgb;
+                vec3 film = 0.5 + 0.5 * cos(6.2831853 * (vec3(0.0, 0.33, 0.67) + rim * 1.2 + 0.1));
+                vec3 add = env * mix(vec3(1.0), film * 1.25, 0.35) * edge * 0.32;
+                float hW = vCutW.y;
+                float wet = 1.0 - smoothstep(0.0, 1.6, hW);
+                float sunSp = pow(max(dot(Nw, normalize(uSunA + Vw)), 0.0), 220.0) * uSunUp;
+                add += env * (0.05 + 0.25 * edge) * wet + sqrt(uSunColA) * sunSp * (0.1 + 0.5 * wet);
+                float cz = artCaustic(vCutW.xz * 0.9 + vec2(vCutW.y * 0.6, -vCutW.y * 0.4), uTimeA * 0.9);
+                add += sqrt(uSunColA) * cz * (1.0 - smoothstep(0.2, 5.5, hW)) * step(-0.3, hW) * uSunUp * 0.07;
+                float y01 = (vCutW.y - (${BASE_Y.toFixed(3)})) / Hb;
+                float n = qn(vec2(vCutW.x * 0.31 + vCutW.z * 0.27, vCutW.y * 0.18 - uTimeA * 0.2)) * 0.6 + qn(vCutW.xz * 0.9 + vCutW.y * 0.3) * 0.4;
+                float breathe = 0.5 + 0.5 * sin(uTimeA * 1.1 + vBid * 1.7);
+                vec3 pearl = vec3(0.86, 0.93, 1.0), gold = vec3(1.0, 0.8, 0.46);
+                vec3 L = pearl * rim4 * disc * (0.05 + 0.03 * breathe) * (1.0 + 1.2 * uNightA);
+                float thread = exp(-pow((hW - 0.85) / 0.3, 2.0));
+                L += gold * coll * (thread * (0.3 + 0.12 * breathe) + rim4 * 0.05);
+                if (prog > 0.002) {
+                    float front = y01 - (prog * 1.08 - 0.04) + (n - 0.5) * 0.12;
+                    float filled = 1.0 - smoothstep(-0.02, 0.02, front);
+                    float band = exp(-front * front / 0.00045) * (0.6 + 0.4 * n);
+                    L += (gold * band * 0.24 + mix(gold, pearl, 0.5) * filled * (0.02 + 0.025 * n + rim2 * 0.05)) * (1.0 - disc * 0.6);
+                }
+                for (int i = 0; i < 4; i++) {
+                    vec4 ev = uAwk[i];
+                    float age = uTimeA - ev.y;
+                    if (abs(ev.x - vBid) < 0.5 && age > 0.0 && age < 5.0) {
+                        float fr = smoothstep(0.0, 2.6, age) * 1.25 - 0.1;
+                        float f2 = y01 - fr + (n - 0.5) * 0.18;
+                        float fade = 1.0 - smoothstep(2.8, 5.0, age);
+                        L += mix(gold, pearl, smoothstep(0.0, 1.0, y01)) * (exp(-f2 * f2 / 0.002) * 0.38 * fade + exp(-age * 1.3) * 0.04 + rim2 * rim * 0.1 * fade);
+                    }
+                }
+                vec3 pc = sqrt(max(outgoingLight, 0.0)) + (add + L) * uArtFx;
+                outgoingLight = pc * pc;
+            }
+            #endif`;
 
         // ===================== PROSEDÜREL DOKULAR =====================
         let texSeed = 1;
@@ -706,13 +824,9 @@ canvas{touch-action:none}
             MAT.roadGlass = lgMaterial({ thick: 0.6, frost: 0.28, disp: 0.02, tint: 0xe2f3f6, tintA: 0.1, refl: 0.7 });
             MAT.sphereGlass = lgMaterial({ thick: 5.0, frost: 0.0, disp: 0.06, tint: 0xf4fbff, tintA: 0.04, refl: 1.0, glare: 1.6 });
             MAT.ringGlass = lgMaterial({ thick: 2.0, frost: 0.0, disp: 0.05, tint: 0xfff4e2, tintA: 0.08, refl: 1.0, glare: 1.8 });
-            MAT.sphereMirror = new THREE.MeshStandardMaterial({ color: 0xf6f7fa, metalness: 1, roughness: 0.012, envMapIntensity: 1.3 });
-            // adacık aynaları: okyanusun gerçek zamanlı düzlemsel ayna görüntüsünü kullanır (keskin, gerçek zamanlı, uzaktan da temiz)
-            MAT.mirrorWater = new THREE.ShaderMaterial({
-                uniforms: { uMirror: { value: null }, uTexMat: { value: new THREE.Matrix4() }, uFogColor: { value: new THREE.Color() }, uFogD: { value: 0.0002 }, uNight: U.night, uTime: U.time },
-                vertexShader: 'uniform mat4 uTexMat; varying vec4 vM; varying vec3 vW; varying float vFD; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; vM = uTexMat * w; vec4 mv = viewMatrix * w; vFD = -mv.z; gl_Position = projectionMatrix * mv; }',
-                fragmentShader: 'uniform sampler2D uMirror; uniform vec3 uFogColor; uniform float uFogD; uniform float uNight; uniform float uTime; varying vec4 vM; varying vec3 vW; varying float vFD; void main(){ vec2 uv = vM.xy / vM.w; uv += vec2(sin(vW.x * 0.6 + uTime * 0.8), cos(vW.z * 0.55 + uTime * 0.7)) * 0.0012; vec3 r = texture2D(uMirror, clamp(uv, 0.001, 0.999)).rgb; vec3 V = normalize(cameraPosition - vW); float fr = pow(1.0 - abs(V.y), 3.0); vec3 c = r * vec3(0.93, 0.97, 1.0) + fr * 0.06; float f = 1.0 - exp(-uFogD * uFogD * vFD * vFD); gl_FragColor = vec4(mix(c, uFogColor, f), 1.0); }'
-            });
+            MAT.sphereMirror = new THREE.MeshStandardMaterial({ color: 0xf6f7fa, metalness: 1, roughness: 0.01, envMap: liveEnv, envMapIntensity: 1.25 });
+            // adacık aynaları: şehrin pişirilmiş küp haritasını yansıtan kusursuz ayna yüzey (her açıdan kararlı, kuş bakışında da)
+            MAT.mirrorWater = new THREE.MeshStandardMaterial({ color: 0xeef3f7, metalness: 1, roughness: 0.03, envMap: liveEnv, envMapIntensity: 1.2 });
             MAT.mirrorWater.userData.uv = 0;
             MAT.pedestal = patchMaterial(new THREE.MeshPhysicalMaterial({ color: 0xe4ddcf, roughness: 0.5, clearcoat: 0.3, clearcoatRoughness: 0.3 }), 'ped', { wet: true, weather: 0.06 });
             MAT.path = pathMaterial();
@@ -826,7 +940,7 @@ canvas{touch-action:none}
         }
         function tubeAlong(batchName, M, pts, radius, closed, radial) {
             const curve = new THREE.CatmullRomCurve3(pts.map(p => new THREE.Vector3(p[0], p[1], p[2])), !!closed, 'centripetal');
-            const g = new THREE.TubeGeometry(curve, Math.max(8, pts.length * 3), radius, radial || 6, !!closed);
+            const g = new THREE.TubeGeometry(curve, Math.max(8, Math.round(pts.length * 3 * GEO_Q)), radius, radial || 6, !!closed);
             batch(batchName).add(g, M); g.dispose();
         }
         function yawOfLocalX(M) { return Math.atan2(M.elements[0], M.elements[2]); }
@@ -837,19 +951,26 @@ canvas{touch-action:none}
         function init() {
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 16000);
-            renderer = new THREE.WebGLRenderer({ antialias: !IS_MOBILE, powerPreference: IS_MOBILE ? 'default' : 'high-performance', stencil: false });
+            renderer = new THREE.WebGLRenderer({ antialias: !IS_MOBILE && Q.tier >= 3, powerPreference: IS_MOBILE ? 'default' : 'high-performance', stencil: false });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PR));
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PR, IS_MOBILE ? MAX_PR : 1.5));
+            GOV.prMax = Math.min(window.devicePixelRatio || 1, MAX_PR);
+            // r128, envMap'siz MeshBasicMaterial'a cameraPosition göndermez. Eser gölgelendiricisi kendi kamera konumunu kullanır;
+            // three her render() çağrısının sonunda malzeme önbelleğini sıfırladığı için, her çağrıdan hemen önce (ana kamera, ayna,
+            // yansıma küpü, harita) o çağrının kamerasını yazmak doğru ve güvenlidir.
+            const _render0 = renderer.render.bind(renderer);
+            renderer.render = (s, c) => { if (AWAKE.uni) { if (c.parent === null) c.updateMatrixWorld(); AWAKE.uni.uCamA.value.setFromMatrixPosition(c.matrixWorld); } return _render0(s, c); };
             renderer.domElement.addEventListener('webglcontextlost', ev => {
                 ev.preventDefault();
-                try { sessionStorage.setItem('sucity.safe', '1'); } catch (e) {}
+                // kademeli: ilk kayıpta bir kademe hafifle, ikincide güvenli mod. Kaldığın yer ve saat korunur.
+                try { sessionStorage.setItem('sucity.safe', String(Math.min(2, SAFE_LEVEL + 1))); RESUME.save(); localStorage.removeItem('sucity.q.v3'); } catch (e) {}
                 const o = document.createElement('div');
-                o.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#05080e;color:#eef2f7;font:15px system-ui;text-align:center;padding:24px;z-index:99';
-                o.textContent = 'Cihazın grafik belleği doldu. SU CITY daha hafif ayarlarla yeniden açılıyor…';
+                o.style.cssText = 'position:fixed;inset:0;display:flex;flex-direction:column;gap:10px;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 40%,#123247,#04080f 70%);color:#eef2f7;font:15px system-ui;text-align:center;padding:24px;z-index:99';
+                o.innerHTML = '<div style="letter-spacing:.3em;font-size:22px;font-weight:300">SU CITY</div><div>Su bir an bulanıklaştı. Şehir daha hafif bir nefesle, kaldığın yerden yeniden açılıyor…</div>';
                 document.body.appendChild(o); setTimeout(() => location.reload(), 1600);
             }, false);
             renderer.outputEncoding = THREE.sRGBEncoding;
-            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMapping = THREE.CustomToneMapping;
             renderer.toneMappingExposure = 0.8;
             renderer.shadowMap.enabled = FEATURES.shadows;
             renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -859,24 +980,24 @@ canvas{touch-action:none}
             scene.fog = new THREE.FogExp2(0xb9cde0, 0.00022);
 
             BOOT.run([
-                ['Malzemeler', createMaterials], ['Gökyüzü', createSky], ['Işık', createLights], ['Cam yollar', createRoads], ['Merkez küre', createPlaza],
-                ['Binalar', createBuildings], ['Limanlar', createMarinas], ['Deniz feneri', createLighthouse], ['Mumlar', createCandles], ['Okyanus', createOcean],
-                ['Deniz tabanı', createSeabed], ['Kağıt gemiler', createBoats], ['Martılar', createSeagulls], ['Balıklar', createFish], ['Birleştirme', finishInit]
+                ['Pigmentler suya karışıyor', createMaterials], ['Gökyüzü renk alıyor', createSky], ['Işık yerini buluyor', createLights], ['Cam yollar dökülüyor', createRoads], ['Merkez küre süzülüyor', createPlaza],
+                ['Eserler binaya dönüşüyor', createBuildings], ['Limanlar bağlanıyor', createMarinas], ['Fener uyanıyor', createLighthouse], ['Mumlar yakılıyor', createCandles], ['Deniz nefes alıyor', createOcean],
+                ['Dip ışığı yayılıyor', createSeabed], ['Kağıt gemiler katlanıyor', createBoats], ['Martılar havalanıyor', createSeagulls], ['Balıklar dalıyor', createFish], ['Şehir bir araya geliyor', finishInit]
             ]);
         }
         function finishInit() {
-            Object.keys(B).forEach(k => { const m = B[k].build(MAT[k].transparent ? { noCast: true } : null); if (m && MAT[k].transparent) { m.renderOrder = 6; m.receiveShadow = false; } if (m && MAT[k].userData.lg) LG.meshes.push(m); if (m && k === 'mirrorWater') { hiddenInMirror.push(m); m.receiveShadow = false; m.castShadow = false; } });
-            MAT.mirrorWater.uniforms.uMirror.value = mirror.rt.texture; MAT.mirrorWater.uniforms.uTexMat.value = mirror.texMat;
-            nightHooks.push(() => { MAT.mirrorWater.uniforms.uFogColor.value.copy(scene.fog.color); MAT.mirrorWater.uniforms.uFogD.value = scene.fog.density; });
+            Object.keys(B).forEach(k => { const m = B[k].build(MAT[k].transparent ? { noCast: true } : null); if (m && MAT[k].transparent) { m.renderOrder = 6; m.receiveShadow = false; } if (m && MAT[k].userData.lg) LG.meshes.push(m); if (m && k === 'mirrorWater') { m.receiveShadow = false; m.castShadow = false; } });
             PAINT.init();
+            createShoreFoam();
+            AWAKE.makeFx();
             createBirds();
             createRig();
             setupControls();
             applyTOD(TOD.hour, true);
             camera.updateMatrixWorld();
             SPH_ENV.init();
-            for (let k = 0; k < 6; k++) { LIVE_ENV.update(camera, k === 0); SPH_ENV.update(k === 0); }
-            for (let k = 0; k < 6; k++) { LIVE_ENV.update(camera, k === 0); SPH_ENV.update(k === 0); }
+            for (let k = 0; k < 6; k++) LIVE_ENV.update(camera, k === 0);
+            for (let k = 0; k < 6; k++) LIVE_ENV.update(camera, k === 0);
             if (window.SU) SU.init();
             BOOT.done();
             animate();
@@ -886,12 +1007,12 @@ canvas{touch-action:none}
         const BOOT = {
             el: null,
             show(txt, frac) {
-                if (!this.el) { this.el = document.createElement('div'); this.el.id = 'su-boot'; this.el.innerHTML = '<div class="b-title">SU CITY</div><div class="b-bar"><i></i></div><div class="b-txt"></div>'; document.body.appendChild(this.el); }
+                if (!this.el) { this.el = document.createElement('div'); this.el.id = 'su-boot'; this.el.innerHTML = '<div class="b-title">SU CITY</div><div class="b-sub">Deniz Şehri · renk bir sorudur</div><div class="b-bar"><i></i></div><div class="b-txt"></div>'; document.body.appendChild(this.el); }
                 this.el.querySelector('.b-txt').textContent = txt; this.el.querySelector('i').style.width = Math.round(frac * 100) + '%';
             },
             async run(steps) {
                 for (let i = 0; i < steps.length; i++) {
-                    this.show(steps[i][0] + ' hazırlanıyor…', i / steps.length);
+                    this.show(steps[i][0] + '…', i / steps.length);
                     await new Promise(r => setTimeout(r, 16));
                     try { steps[i][1](); }
                     catch (err) { console.error(err); this.fail(err); return; }
@@ -901,13 +1022,13 @@ canvas{touch-action:none}
             fail(err) {
                 this.show('Açılışta bir sorun oluştu: ' + (err && err.message ? err.message : err), 1);
                 const b = document.createElement('button'); b.textContent = SAFE_MODE ? 'Yeniden dene' : 'Hafif modda yeniden aç';
-                b.onclick = () => { try { sessionStorage.setItem('sucity.safe', '1'); } catch (e) {} location.reload(); };
+                b.onclick = () => { try { sessionStorage.setItem('sucity.safe', '2'); } catch (e) {} location.reload(); };
                 this.el.appendChild(b);
             }
         };
 
         // ===================== GÖKYÜZÜ, ZAMAN, IŞIK =====================
-        const ATMO = { Re: 6360, Ra: 6420, Hr: 7.994, Hm: 1.2, bR: [5.8e-3, 13.5e-3, 33.1e-3], bM: 21e-3, g: 0.76, I: 20 };
+        const ATMO = { Re: 6360, Ra: 6420, Hr: 7.994, Hm: 1.2, bR: [5.8e-3, 13.5e-3, 33.1e-3], bO: [2.04e-3, 4.97e-3, 0.21e-3], bM: 21e-3, g: 0.76, I: 20 };
         function atmoJS(rd, sd, I) {
             const A = ATMO, ro = [0, A.Re + 0.002, 0];
             const rs = (o, d, R) => { const b = o[0] * d.x + o[1] * d.y + o[2] * d.z, c = o[0] * o[0] + o[1] * o[1] + o[2] * o[2] - R * R, D = b * b - c; return D < 0 ? -1e9 : -b + Math.sqrt(D); };
@@ -924,7 +1045,7 @@ canvas{touch-action:none}
                     if (hh < 0) { lit = false; break; }
                     lR += Math.exp(-hh / A.Hr) * dl; lM += Math.exp(-hh / A.Hm) * dl;
                 }
-                if (lit) for (let k = 0; k < 3; k++) { const att = Math.exp(-(A.bR[k] * (odR + lR) + A.bM * 1.1 * (odM + lM))); sR[k] += att * hr; sM[k] += att * hm; }
+                if (lit) for (let k = 0; k < 3; k++) { const att = Math.exp(-((A.bR[k] + A.bO[k]) * (odR + lR) + A.bM * 1.1 * (odM + lM))); sR[k] += att * hr; sM[k] += att * hm; }
             }
             return [0, 1, 2].map(k => I * (sR[k] * A.bR[k] * pR + sM[k] * A.bM * pM));
         }
@@ -937,7 +1058,7 @@ canvas{touch-action:none}
         }
         function sunTransmittance(elDeg) {
             const e = Math.max(elDeg, -1.5), m = 1 / (Math.sin(e * Math.PI / 180) + 0.50572 * Math.pow(e + 6.07995, -1.6364));
-            return ATMO.bR.map(b => Math.exp(-(b * ATMO.Hr + ATMO.bM * 1.1 * ATMO.Hm) * m));
+            return ATMO.bR.map((b, k) => Math.exp(-((b + ATMO.bO[k]) * ATMO.Hr + ATMO.bM * 1.1 * ATMO.Hm) * m));
         }
         function acesJS(c, exposure) {
             const v = c.map(x => x * exposure / 0.6);
@@ -999,7 +1120,7 @@ canvas{touch-action:none}
             scene.add(hemiLight);
             sunLight = new THREE.DirectionalLight(0xfff1dc, 2.4);
             sunLight.castShadow = FEATURES.shadows;
-            const sm = IS_MOBILE ? 1024 : 4096;
+            const sm = IS_MOBILE ? 1024 : Q.tier >= 3 ? 2048 : 1536;
             sunLight.shadow.mapSize.set(sm, sm);
             const sc = sunLight.shadow.camera;
             sc.left = -650; sc.right = 650; sc.top = 650; sc.bottom = -650; sc.near = 10; sc.far = 3400;
@@ -1020,6 +1141,7 @@ canvas{touch-action:none}
             const night = sstep(1, -11, elDeg);
             TOD.night = night; TOD.el = elDeg; U.night.value = night;
             const sunUp = sstep(-2.5, 3, elDeg), moonUp = sstep(-4, -12, elDeg) * sstep(0, 0.2, MOON.y);
+            if (AWAKE.uni) AWAKE.uni.uSunUp.value = sunUp * (1 - night);
             const T = sunTransmittance(elDeg);
             SUN_COL.setRGB(T[0], T[1], T[2]);
             if (sunUp > 0) LIGHT.set(SUN.x, Math.max(SUN.y, 0.035), SUN.z).normalize(); else LIGHT.copy(MOON);
@@ -1193,7 +1315,7 @@ canvas{touch-action:none}
             glassRoads.renderOrder = 6; glassRoads.matrixAutoUpdate = false; glassRoads.updateMatrix(); scene.add(glassRoads); LG.meshes.push(glassRoads);
             PAINT.geos.push(ribbon(GLASS_PROFILE.slice(2, 11), 0.035));
             const nodeGeo = new THREE.CylinderGeometry(NR, NR, 0.97, 72);
-            const nodeTop = new THREE.CircleGeometry(NR - 0.15, 72); nodeTop.rotateX(-Math.PI / 2);
+            const nodeTop = new THREE.RingGeometry(0.05, NR - 0.15, 48, 8); nodeTop.rotateX(-Math.PI / 2);
             pathNodes.forEach(nd => {
                 place('roadGlass', nodeGeo, new THREE.Matrix4(), nd.x, DECK + 0.07, nd.z);
                 const g = nodeTop.clone(); g.translate(nd.x, DECK + 0.6, nd.z); PAINT.geos.push(g);
@@ -1201,7 +1323,7 @@ canvas{touch-action:none}
             // adacık içleri: şeffaf ayna cam ada (eskiden yeşil alanlardı)
             PODS.forEach(pod => {
                 const r = pod.R - ROAD_HALF - 1.2; if (r < 6) return;
-                place('roadGlass', GEO.podIsle || (GEO.podIsle = new THREE.CylinderGeometry(1, 1, 1, 96)), new THREE.Matrix4(), pod.x, DECK - 0.35, pod.z, 0, 0, 0, r, 0.5, r);
+                place('bridgeGlass', new THREE.TorusGeometry(r, 0.28, gq(12, 6), gq(120, 48)).rotateX(Math.PI / 2), new THREE.Matrix4(), pod.x, WATER_Y + 0.5, pod.z);
                 place('mirrorWater', GEO.podMir || (GEO.podMir = (() => { const g = new THREE.CircleGeometry(1, 96); g.rotateX(-Math.PI / 2); return g; })()), new THREE.Matrix4(), pod.x, WATER_Y + 0.32, pod.z, 0, 0, 0, r - 0.3, 1, r - 0.3);
             });
         }
@@ -1254,10 +1376,10 @@ canvas{touch-action:none}
         function createPlaza() {
             const R = PLAZA_R, M = new THREE.Matrix4();
             place('roadGlass', new THREE.CylinderGeometry(R, R, 1.0, 160), M, 0, DECK + 0.06, 0);
-            const pd = new THREE.CircleGeometry(R - 0.2, 128); pd.rotateX(-Math.PI / 2); pd.translate(0, DECK + 0.6, 0); PAINT.geos.push(pd);
+            const pd = new THREE.RingGeometry(0.1, R - 0.2, 96, 16); pd.rotateX(-Math.PI / 2); pd.translate(0, DECK + 0.6, 0); PAINT.geos.push(pd);
             const SR = 23, g = new THREE.Group(); g.position.set(0, DECK + 14 + SR, 0);
-            const top = new THREE.Mesh(new THREE.SphereGeometry(SR, 128, 64, 0, Math.PI * 2, 0, Math.PI / 2), MAT.sphereMirror);
-            const bot = new THREE.Mesh(new THREE.SphereGeometry(SR, 128, 64, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), MAT.sphereGlass);
+            const top = new THREE.Mesh(new THREE.SphereGeometry(SR, gq(128, 48), gq(64, 24), 0, Math.PI * 2, 0, Math.PI / 2), MAT.sphereMirror);
+            const bot = new THREE.Mesh(new THREE.SphereGeometry(SR, gq(128, 48), gq(64, 24), 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), MAT.sphereGlass);
             bot.renderOrder = 6; LG.meshes.push(bot);
             // ayna yarıda ince oyma çizgiler: kürenin kendi etrafında döndüğü bu çizgilerden okunur
             const etch = new THREE.Group();
@@ -1286,19 +1408,23 @@ canvas{touch-action:none}
 
         // ===================== ÇATILAR: eser zemini + sıvı cam heykeller (gece de asla kararmaz) =====================
         // Çatının zemini artık binanın kendi eseri; üstünde ışığı kıran, kenarlarında parlayan sıvı cam formlar durur.
+        // v3 · cam formların eğri / pah dilim sayısı cihaz kademesine göre (masaüstünde değişmez). Telefonda çatı, korkuluk ve
+        // köprü camları toplam üçgenin üçte ikisiydi; bu ölçekte görünmeyen dilimler atılır, silüet aynı kalır.
+        const GEO_Q = SAFE_MODE ? 0.35 : IS_MOBILE ? [0.4, 0.55, 0.7][Math.min(2, Q.tier)] : (Q.tier >= 3 ? 1 : 0.8);
+        const gq = (n, min) => Math.max(min || 1, Math.round(n * GEO_Q));
         function roundedRectShape(w, d, r) {
             const s = new THREE.Shape(), x = -w / 2, y = -d / 2; r = Math.min(r, w / 2 - 0.01, d / 2 - 0.01);
             s.moveTo(x + r, y); s.lineTo(x + w - r, y); s.quadraticCurveTo(x + w, y, x + w, y + r); s.lineTo(x + w, y + d - r); s.quadraticCurveTo(x + w, y + d, x + w - r, y + d);
             s.lineTo(x + r, y + d); s.quadraticCurveTo(x, y + d, x, y + d - r); s.lineTo(x, y + r); s.quadraticCurveTo(x, y, x + r, y); return s;
         }
         function slab(w, d, h, r, bevel) {
-            const g = new THREE.ExtrudeGeometry(roundedRectShape(w - 2 * bevel, d - 2 * bevel, r), { depth: Math.max(0.01, h - 2 * bevel), bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 5, curveSegments: 10 });
+            const g = new THREE.ExtrudeGeometry(roundedRectShape(w - 2 * bevel, d - 2 * bevel, r), { depth: Math.max(0.01, h - 2 * bevel), bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: gq(5, 1), curveSegments: gq(10, 3) });
             g.rotateX(-Math.PI / 2); g.translate(0, bevel, 0); return g;
         }
         function coping(M, hw, hd, gz) {
             const fr = new THREE.Shape(); const o = roundedRectShape(2 * hw + 0.5, 2 * hd + 0.5, 0.9), i = roundedRectShape(2 * hw - 0.5, 2 * hd - 0.5, 0.5);
-            o.holes.push(new THREE.Path(i.getPoints(12).reverse()));
-            const g = new THREE.ExtrudeGeometry(o, { depth: 0.5, bevelEnabled: true, bevelThickness: 0.12, bevelSize: 0.12, bevelSegments: 3, curveSegments: 10 }); g.rotateX(-Math.PI / 2);
+            o.holes.push(new THREE.Path(i.getPoints(gq(12, 4)).reverse()));
+            const g = new THREE.ExtrudeGeometry(o, { depth: 0.5, bevelEnabled: true, bevelThickness: 0.12, bevelSize: 0.12, bevelSegments: gq(3, 1), curveSegments: gq(10, 4) }); g.rotateX(-Math.PI / 2);
             place('lg_' + gz, g, M, 0, 0.12, 0);
             addPerchLine(M, -hw, 0.8, -hd, hw, 0.8, -hd, Math.PI); addPerchLine(M, -hw, 0.8, hd, hw, 0.8, hd, 0);
             return 0.75;
@@ -1330,8 +1456,8 @@ canvas{touch-action:none}
         }
         function terraceRoof(M, hw, hd, gz) {
             const o = roundedRectShape(2 * hw - 0.4, 2 * hd - 0.4, 1.4), i = roundedRectShape(2 * hw - 0.7, 2 * hd - 0.7, 1.25);
-            o.holes.push(new THREE.Path(i.getPoints(12).reverse()));
-            const g = new THREE.ExtrudeGeometry(o, { depth: 1.15, bevelEnabled: false, curveSegments: 12 }); g.rotateX(-Math.PI / 2);
+            o.holes.push(new THREE.Path(i.getPoints(gq(12, 4)).reverse()));
+            const g = new THREE.ExtrudeGeometry(o, { depth: 1.15, bevelEnabled: false, curveSegments: gq(12, 4) }); g.rotateX(-Math.PI / 2);
             place('lg_' + gz, g, M, 0, 0.6, 0);
             const pw = Math.max(3.5, hw * 0.75), pd2 = Math.max(3.5, hd * 0.75);
             place('lg_' + gz, slab(pw, pd2, 3.0, Math.min(pw, pd2) * 0.3, 0.45), M, hw * 0.12, 0.6, -hd * 0.08);
@@ -1363,7 +1489,7 @@ canvas{touch-action:none}
             place('lg_' + gz, GEO.cylCap || (GEO.cylCap = (() => { const g = new THREE.TorusGeometry(1, 0.035, 10, 64); g.rotateX(Math.PI / 2); return g; })()), M, 0, 0.12, 0, 0, 0, 0, r * 1.03, r * 1.03, r * 1.03);
             if (kind === 'cylLens') {
                 const prof = []; for (let k = 0; k <= 16; k++) { const t = k / 16, a = t * Math.PI; prof.push(new THREE.Vector2(Math.sin(a) * 1, 0.5 - 0.5 * Math.cos(a))); }
-                const lens = new THREE.LatheGeometry(prof.map(p => new THREE.Vector2(p.x, (p.y - 0.5) * 0.22 + 0.5)), 64);
+                const lens = new THREE.LatheGeometry(prof.map(p => new THREE.Vector2(p.x, (p.y - 0.5) * 0.22 + 0.5)), gq(64, 24));
                 place('lg_' + gz, lens, M, 0, 1.4, 0, 0, 0, 0, r * 0.86, 1.6, r * 0.86);
                 place('lg_' + gz, GEO.post || (GEO.post = new THREE.CylinderGeometry(0.09, 0.09, 1, 10)), M, 0, 1.0, 0, 0, 0, 0, 2.2, 1.4, 2.2);
                 perches.push({ pts: [worldPt(M, r * 0.6, 2.6, 0)], yaw: 0, type: 'apex' });
@@ -1384,6 +1510,26 @@ canvas{touch-action:none}
             placeholder() {
                 if (!this.ph) { const d = new Uint8Array([120, 132, 148, 255]); this.ph = new THREE.DataTexture(d, 1, 1, THREE.RGBAFormat); this.ph.encoding = THREE.sRGBEncoding; this.ph.needsUpdate = true; }
                 return this.ph;
+            },
+            // v3 · eserin yaklaşık paleti (24×24 örnek, doygunluk ağırlıklı ton kovaları). Yalnız metin ve meta veri içindir;
+            // eserin görüntüsüne hiçbir şekilde uygulanmaz.
+            analyze(src, mat) {
+                if (mat.userData.palette) return;
+                try {
+                    const c = document.createElement('canvas'); c.width = c.height = 24; const g = c.getContext('2d', { willReadFrequently: true });
+                    g.drawImage(src, 0, 0, 24, 24); const d = g.getImageData(0, 0, 24, 24).data, B = new Map(); let sw = 0, ss = 0;
+                    for (let i = 0; i < d.length; i += 4) {
+                        const r = d[i] / 255, gg = d[i + 1] / 255, b = d[i + 2] / 255, mx = Math.max(r, gg, b), mn = Math.min(r, gg, b), l = (mx + mn) / 2, dl = mx - mn;
+                        const s = dl < 1e-4 ? 0 : dl / (1 - Math.abs(2 * l - 1) + 1e-4);
+                        let h = 0; if (dl > 1e-4) { h = mx === r ? ((gg - b) / dl) % 6 : mx === gg ? (b - r) / dl + 2 : (r - gg) / dl + 4; h = (h * 60 + 360) % 360; }
+                        const key = s < 0.14 ? 'n' + Math.min(2, Math.floor(l * 3)) : Math.floor(h / 30) + '_' + Math.min(2, Math.floor(l * 3));
+                        const w = 0.25 + s; let o = B.get(key); if (!o) B.set(key, o = { w: 0, r: 0, g: 0, b: 0, h, s, l }); o.w += w; o.r += r * w; o.g += gg * w; o.b += b * w; sw += w; ss += s;
+                    }
+                    const top = [...B.values()].sort((a, b) => b.w - a.w).slice(0, 5);
+                    const hex = o => '#' + [o.r, o.g, o.b].map(v => Math.round(v / o.w * 255).toString(16).padStart(2, '0')).join('');
+                    const chroma = top.filter(o => o.s >= 0.14).sort((a, b) => b.w * (0.4 + b.s) - a.w * (0.4 + a.s))[0];
+                    mat.userData.palette = { colors: top.map(hex), hue: chroma ? chroma.h : -1, sat: ss / (d.length / 4), light: top.length ? top[0].l : 0.5 };
+                } catch (e) { mat.userData.palette = { colors: [], hue: -1, sat: 0, light: 0.5 }; }
             },
             fetch(url, maxSize) {
                 return new Promise((res, rej) => {
@@ -1409,7 +1555,8 @@ canvas{touch-action:none}
                 while (this.active < this.max && this.queue.length) {
                     const job = this.queue.shift(); this.active++;
                     this.fetch(job.url, ART_MAX).then(src => {
-                        job.mat.map = this.texture(src, IS_MOBILE); job.mat.userData.lowMap = job.mat.map; job.mat.needsUpdate = true;
+                        this.analyze(src, job.mat);
+                        job.mat.map = this.texture(src, !!src.getContext); job.mat.userData.lowMap = job.mat.map; job.mat.needsUpdate = true;
                     }).catch(() => { job.mat.map = null; job.mat.color.set(0x9a9a9a); job.mat.needsUpdate = true; })
                         .finally(() => { this.active--; this.loaded++; this.pump(); });
                 }
@@ -1417,20 +1564,76 @@ canvas{touch-action:none}
             // incelenen binanın eseri: tam çözünürlük (telefonda 1024 kenar), bırakılınca hafif sürüme dön
             hi: null,
             raise(mat) {
-                if (!mat || !mat.userData || !mat.userData.textureURL || ART_MAX >= 2048) return;
+                if (!mat || !mat.userData || !mat.userData.textureURL) return;
                 this.lower();
-                const tag = this.hi = { mat, tex: null };
-                this.fetch(mat.userData.textureURL, SAFE_MODE ? 640 : 1024).then(src => { if (this.hi !== tag) return; tag.tex = this.texture(src, true); mat.map = tag.tex; mat.needsUpdate = true; }).catch(() => {});
+                const tag = this.hi = { mat, tex: null }, maxT = (renderer && renderer.capabilities.maxTextureSize) || 4096;
+                // masaüstünde orijinal çözünürlük (GPU sınırına kadar); telefonda kademeye göre
+                const cap = SAFE_MODE ? 768 : IS_MOBILE ? [1024, 1280, 1600][Math.min(2, Q.tier)] : Math.min(maxT, Q.tier >= 3 ? 8192 : 2048);
+                this.fetch(mat.userData.textureURL, cap).then(src => { if (this.hi !== tag) return; tag.tex = this.texture(src, !!src.getContext); mat.map = tag.tex; mat.needsUpdate = true; }).catch(() => {});
+            },
+            // bellek baskısında yakın çevredeki yüksek çözünürlükleri bırak (hafif sürümler kalır)
+            trim(keep) {
+                let k = 0;
+                this.near.forEach((tag, mat) => { if (k++ < (keep || 0)) return; this.near.delete(mat); tag.dead = true; if (tag.tex) { if (mat.map === tag.tex) mat.map = mat.userData.lowMap; const t = tag.tex; setTimeout(() => t.dispose(), 500); } });
             },
             lower() {
                 const h = this.hi; this.hi = null; if (!h) return;
-                if (h.tex) { h.mat.map = h.mat.userData.lowMap || h.mat.map; h.mat.needsUpdate = true; const t = h.tex; setTimeout(() => t.dispose(), 500); }
+                if (h.tex) { const nt = this.near.get(h.mat); h.mat.map = (nt && nt.tex) || h.mat.userData.lowMap || h.mat.map; const t = h.tex; setTimeout(() => t.dispose(), 500); }
+            },
+            // Yakın çevre akışı (oyun motorlarındaki doku akışı gibi): kameraya en yakın eserler otomatik olarak yüksek çözünürlüğe
+            // yükseltilir, uzaklaşanlar hafif sürüme döner. Bellek sabit kalır, ama baktığın her bina her cihazda keskin görünür.
+            near: new Map(), nearT: 0,
+            updateNear(dt) {
+                if (ART_NEAR <= ART_MAX || !camera || typeof BUILDINGS === 'undefined') return;
+                this.nearT += dt; if (this.nearT < 1.0) return; this.nearT = 0;
+                const K = GOV.memTight ? Math.ceil(ART_NEAR_K / 2) : ART_NEAR_K, HI = ART_NEAR, cp = camera.position, list = [];
+                BUILDINGS.forEach(e => {
+                    const m = e.mesh; if (!m) return; const mat = Array.isArray(m.material) ? m.material[0] : m.material;
+                    if (!mat || !mat.userData || !mat.userData.textureURL || !mat.userData.lowMap) return;
+                    list.push([m.position.distanceToSquared(cp), mat]);
+                });
+                list.sort((a, b) => a[0] - b[0]);
+                const want = new Set(); for (const [d, mat] of list) { if (want.size >= K || d > 300 * 300) break; want.add(mat); }
+                this.near.forEach((tag, mat) => {
+                    if (want.has(mat)) return;
+                    this.near.delete(mat); tag.dead = true;
+                    if (tag.tex) { if (mat.map === tag.tex) mat.map = mat.userData.lowMap; const t = tag.tex; setTimeout(() => t.dispose(), 500); }
+                });
+                let started = 0;
+                want.forEach(mat => {
+                    if (this.near.has(mat) || started >= 2) return; started++;
+                    const tag = { tex: null }; this.near.set(mat, tag);
+                    this.fetch(mat.userData.textureURL, HI).then(src => { if (tag.dead) return; tag.tex = this.texture(src, !!src.getContext); if (!this.hi || this.hi.mat !== mat || !this.hi.tex) mat.map = tag.tex; }).catch(() => {});
+                });
             }
         };
         window.SU_ART = ART;
 
         // ===================== BİNALAR: yol kenarlarına serpiştirilmiş, içten dışa yükselen =====================
+        // v3 · paylaşılan geometri: aynı ölçüdeki binalar konum/normal/uv tamponlarını paylaşır (GPU'ya bir kez yüklenir);
+        // her binanın yalnız kendi küçük kimlik özniteliği (aBid) vardır → durum dokusundan kendi uyanışını okur.
+        const GEO_T = new Map();
+        function sharedTemplate(key, make) { let g = GEO_T.get(key); if (!g) { g = make(); g.computeBoundingSphere(); g.computeBoundingBox(); GEO_T.set(key, g); } return g; }
+        function artGeo(t, bid) {
+            const g = new THREE.BufferGeometry();
+            g.setIndex(t.index); ['position', 'normal', 'uv'].forEach(k => g.setAttribute(k, t.attributes[k]));
+            g.setAttribute('aBid', new THREE.BufferAttribute(new Float32Array(t.attributes.position.count).fill(bid), 1));
+            t.groups.forEach(gr => g.addGroup(gr.start, gr.count, gr.materialIndex));
+            g.boundingSphere = t.boundingSphere; g.boundingBox = t.boundingBox;
+            return g;
+        }
+        // küre binalar için mesafe LOD'u: yakında 64×44, uzakta 28×18 (telefonda ~570 bin üçgen yerine ~150 bin; yansıma geçişi de kazanır)
+        const LOD = {
+            list: [], t: 0, near: SAFE_MODE ? 100 : IS_MOBILE ? [110, 150, 200][Math.min(2, Q.tier)] : 240,
+            hi(e) { const L = e.lod; if (!L) return; if (!L.hi) L.hi = artGeo(L.tHi, e.index); if (e.mesh.geometry !== L.hi) e.mesh.geometry = L.hi; },
+            update(dt) {
+                this.t += dt; if (this.t < 0.4 || !camera) return; this.t = 0;
+                const cp = camera.position, n2 = this.near * this.near, sel = SEL && SEL.building;
+                this.list.forEach(e => { const m = e.mesh, L = e.lod; if (m === sel || m.position.distanceToSquared(cp) < n2) this.hi(e); else if (m.geometry !== L.lo) m.geometry = L.lo; });
+            }
+        };
         function createBuildings() {
+            AWAKE.init();
             for (let i = 2; i <= 121; i++) {
                 const url = `https://raw.githubusercontent.com/busrasuhaydar/evler/main/assest/${i}ev.png`;
                 // Eser her ışıkta, gece ve gündüz, kendi gerçek renginde görünür: ışık, sis ve ton eşleme ona dokunmaz.
@@ -1440,13 +1643,15 @@ canvas{touch-action:none}
                 ART.request(mat, url);
                 // uzaktan bile keskin: doku örneklemesine negatif LOD eğilimi (daha ayrıntılı mip seviyesi)
                 mat.onBeforeCompile = sh => {
-                    Object.assign(sh.uniforms, { uCutOn: CUT.on, uCutA: CUT.a, uCutB: CUT.b, uCutR: CUT.r });
-                    sh.vertexShader = 'varying vec3 vCutW;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n vCutW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
-                    sh.fragmentShader = 'varying vec3 vCutW; uniform float uCutOn; uniform vec3 uCutA; uniform vec3 uCutB; uniform float uCutR;\n' + sh.fragmentShader
+                    Object.assign(sh.uniforms, { uCutOn: CUT.on, uCutA: CUT.a, uCutB: CUT.b, uCutR: CUT.r }, AWAKE.uni);
+                    if (!SAFE_MODE) sh.defines = Object.assign(sh.defines || {}, { ART_FX: '' });
+                    sh.vertexShader = 'varying vec3 vCutW;\n' + ART_VS_HEAD + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n vCutW = (modelMatrix * vec4(transformed, 1.0)).xyz;\n vBid = aBid; vArtN = normalize(mat3(modelMatrix) * normal);');
+                    sh.fragmentShader = 'varying vec3 vCutW; uniform float uCutOn; uniform vec3 uCutA; uniform vec3 uCutB; uniform float uCutR;\n' + ART_FS_HEAD + sh.fragmentShader
                         .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n if (uCutOn > 0.5) { vec3 ab = uCutB - uCutA; float tq = dot(vCutW - uCutA, ab) / dot(ab, ab); if (tq > 0.0 && tq < 1.0 && length(vCutW - (uCutA + ab * tq)) < mix(1.5, uCutR, tq)) discard; }')
-                        .replace('#include <map_fragment>', '#ifdef USE_MAP\n vec4 texelColor = texture2D( map, vUv, -0.85 );\n texelColor = mapTexelToLinear( texelColor );\n diffuseColor *= texelColor;\n#endif');
+                        .replace('#include <map_fragment>', '#ifdef USE_MAP\n vec4 texelColor = texture2D( map, vUv, -0.85 );\n texelColor = mapTexelToLinear( texelColor );\n diffuseColor *= texelColor;\n#endif')
+                        .replace('#include <envmap_fragment>', '#include <envmap_fragment>\n' + ART_FS_BODY);
                 };
-                mat.customProgramCacheKey = () => 'artSharpCut';
+                mat.customProgramCacheKey = () => 'artSharpCutV3';
                 buildingMats.push(mat);
             }
             const order = []; let oi = 0;
@@ -1538,10 +1743,11 @@ canvas{touch-action:none}
                 data.textureURL = mat.userData.textureURL; m.userData = data;
                 if (!spin) { m.matrixAutoUpdate = false; m.updateMatrix(); }
                 scene.add(m); allBuildings.push(m);
-                const e = Object.assign({ mesh: m, type: data.type, f, district: districtOf(f.x, f.z).key, dims: {}, roof: '', glaze: 'pearl', topExtra: 0 }, extra);
+                const e = Object.assign({ mesh: m, type: data.type, f, district: districtOf(f.x, f.z).key, dims: {}, roof: '', glaze: 'pearl', topExtra: 0, index: BUILDINGS.length }, extra);
                 m.userData.entry = e; BUILDINGS.push(e);
                 return m;
             }
+            const bidNext = () => BUILDINGS.length;
             // yol ile bina arasında: zarif, kemerli sıvı cam köprü (korkuluk yerine yuvarlak cam kenar)
             function bridge(f, face) {
                 const gap = f.off - ROAD_HALF - face; if (gap < 0.4) return;
@@ -1561,7 +1767,7 @@ canvas{touch-action:none}
                 place('bridgeGlass', g, BM, 0, 0, 0);
                 [-1, 1].forEach(sx => {
                     const cp = prof.map(([z, y]) => new THREE.Vector3(sx * (W / 2 - 0.08), y + 0.75, z));
-                    const tg = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(cp), 12, 0.07, 6, false);
+                    const tg = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(cp), gq(12, 6), 0.07, gq(6, 4), false);
                     place('bridgeGlass', tg, BM, 0, 0, 0);
                     const wall = []; prof.forEach(([z, y]) => { wall.push(sx * (W / 2 - 0.08), y + 0.15, z, sx * (W / 2 - 0.08), y + 0.75, z); });
                     const wg = new THREE.BufferGeometry(); wg.setAttribute('position', new THREE.Float32BufferAttribute(wall, 3)); const wi = []; for (let i = 0; i < n; i++) { const a = i * 2; wi.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); } wg.setIndex(wi); wg.computeVertexNormals();
@@ -1580,14 +1786,17 @@ canvas{touch-action:none}
                 let e;
                 if (s.type === 'sphere') {
                     const r = s.r, speed = random(0.003, 0.008) * (seededRandom() < 0.5 ? 1 : -1);
-                    const m = addBuilding(new THREE.SphereGeometry(r, 64, 44), f, BASE_Y + r, { type: 'sphere', id: nS++, radius: r }, true, 'sphere', extra);
+                    const tHi = sharedTemplate('sh' + r, () => new THREE.SphereGeometry(r, 64, 44)), tLo = sharedTemplate('sl' + r, () => new THREE.SphereGeometry(r, 28, 18));
+                    const lo = artGeo(tLo, bidNext());
+                    const m = addBuilding(lo, f, BASE_Y + r, { type: 'sphere', id: nS++, radius: r }, true, 'sphere', extra);
+                    m.userData.entry.lod = { tHi, tLo, lo, hi: null }; LOD.list.push(m.userData.entry);
                     const yb = DECK + 0.32 - BASE_Y - r; bridge(f, Math.sqrt(Math.max(1, r * r - yb * yb)));
                     sphereBuildings.push({ mesh: m, rotationSpeed: speed, roofHeight: r });
                     e = m.userData.entry; Object.assign(e, { dims: { r }, roof: 'sphere', topExtra: 0 });
                     perches.push({ pts: [new THREE.Vector3(x, BASE_Y + 2 * r, z)], yaw: random(0, 6.28), type: 'sphere' });
                 } else if (s.type === 'cylinder') {
                     const r = s.r, h = s.h, speed = random(0.002, 0.006) * (seededRandom() < 0.5 ? 1 : -1);
-                    const m = addBuilding(new THREE.CylinderGeometry(r, r, h, 6), f, BASE_Y + h / 2, { type: 'cylinder', id: nC++, height: h, radius: r }, true, 'cyl', extra);
+                    const m = addBuilding(artGeo(sharedTemplate('cy' + r + '_' + h, () => new THREE.CylinderGeometry(r, r, h, 6)), bidNext()), f, BASE_Y + h / 2, { type: 'cylinder', id: nC++, height: h, radius: r }, true, 'cyl', extra);
                     bridge(f, r + 0.1);
                     sphereBuildings.push({ mesh: m, rotationSpeed: speed, roofHeight: h });
                     const kind = seededRandom() < 0.55 ? 'cylLens' : 'cylCone';
@@ -1595,7 +1804,8 @@ canvas{touch-action:none}
                     e.topExtra = cylinderRoof(m, r, h, kind, gz);
                 } else {
                     const w = s.w, h = s.h, d = s.d, hw = w / 2, hd = d / 2, type = s.type === 'tall' ? 'tall' : 'box';
-                    const bm = addBuilding(new THREE.BoxGeometry(w, h, d), f, BASE_Y + h / 2, { type, id: type === 'tall' ? nT++ : nB++, height: h }, false, 'box', extra);
+                    const bg = new THREE.BoxGeometry(w, h, d); bg.setAttribute('aBid', new THREE.BufferAttribute(new Float32Array(bg.attributes.position.count).fill(bidNext()), 1));
+                    const bm = addBuilding(bg, f, BASE_Y + h / 2, { type, id: type === 'tall' ? nT++ : nB++, height: h }, false, 'box', extra);
                     e = bm.userData.entry; e.dims = { w, h, d };
                     bridge(f, hd);
                     const TM = M.clone().multiply(new THREE.Matrix4().makeTranslation(0, h, 0));
@@ -1608,6 +1818,7 @@ canvas{touch-action:none}
                 }
                 if (ed) ed.buildings.push(e);
             });
+            BUILDINGS.forEach(e => AWAKE.setHeight(e.index, e.type === 'sphere' ? 2 * e.dims.r : e.dims.h));
             createAviationLights();
             let bad = 0;
             for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) if (overlap(placed[i], placed[j])) bad++;
@@ -1808,10 +2019,11 @@ canvas{touch-action:none}
             const N = spots.length; if (!N) return;
             const prof = [[0, 0], [0.33, 0], [0.34, 0.04], [0.34, 0.52], [0.3, 0.56], [0.2, 0.53], [0.06, 0.5], [0, 0.5]].map(([a, b]) => new THREE.Vector2(a, b));
             const waxMat = new THREE.MeshStandardMaterial({ color: 0xf4ead8, roughness: 0.5, metalness: 0, emissive: 0xffb86b, emissiveIntensity: 0.0 });
-            const wax = new THREE.InstancedMesh(new THREE.LatheGeometry(prof, 20), waxMat, N);
+            const CSEG = IS_MOBILE ? 12 : 20; // telefonda daha az dilim: binlerce mumda ~%40 daha az üçgen
+            const wax = new THREE.InstancedMesh(new THREE.LatheGeometry(prof, CSEG), waxMat, N);
             const dishMat = new THREE.MeshPhysicalMaterial({ color: 0xe8f4f2, roughness: 0.05, transparent: true, opacity: 0.35, envMapIntensity: 1.6, depthWrite: false, clearcoat: 1 });
             const dishP = [[0, 0], [0.55, 0.02], [0.62, 0.16], [0.6, 0.2], [0.5, 0.06], [0, 0.04]].map(([a, b]) => new THREE.Vector2(a, b));
-            const dish = new THREE.InstancedMesh(new THREE.LatheGeometry(dishP, 20), dishMat, N);
+            const dish = new THREE.InstancedMesh(new THREE.LatheGeometry(dishP, CSEG), dishMat, N);
             const wick = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.015, 0.02, 0.12, 4).translate(0, 0.56, 0), new THREE.MeshBasicMaterial({ color: 0x1a120c }), N);
             const fpos = new Float32Array(N * 3), fph = new Float32Array(N), fsz = new Float32Array(N);
             // dört boy: küçük (önceki boy), orta, büyük, çok büyük
@@ -1868,145 +2080,129 @@ canvas{touch-action:none}
             return g;
         }
 
-        // ===================== GEZİ BOYASI (yalnız geçtiğin yerlerde akan, opak akrilik döküm boya) =====================
-        // Ruhun geçtiği her yer dünya koordinatlı bir maske dokusuna işlenir. Cam yolların üst yüzeyindeki boya katmanı bu maskeyi okur:
-        // geçilmemiş yer cam olarak kalır, geçilen yerde yoğun, renkleri her ışıkta belli olan bir akrilik döküm belirir. Tarayıcıda saklanır.
+        // ===================== GEZİ BOYASI (busr.html döküm boyası; daha yumuşak parlaklık, daha geniş renk paleti) =====================
+        // Ruhun geçtiği her yer dünya koordinatlı bir maske dokusuna işlenir. Yolların üst yüzeyindeki boya katmanı bu maskeyi okur:
+        // geçilmemiş yer cam kalır, geçilen yerde akrilik döküm belirir. Doku doğrusal süzülür, kenar gürültüyle kırılır → piksel/kare yok.
         const PAINT_VS = `
             varying vec3 vW; varying vec3 vN;
             void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; vN = normalize(mat3(modelMatrix) * normal); gl_Position = projectionMatrix * viewMatrix * w; }`;
-        // Maske dokusu: R = kaplama (yol merkezinden kenara azalan), G = yaş (boya döküldükten sonra 0→1 büyür), B = renk tohumu (yolculuk zamanı).
-        // Shader, boyayı bir anda değil; merkezden kenarlara, parmak parmak ilerleyen akışkan bir döküm olarak yayar. Taze boya daha parlak,
-        // daha hızlı akar ve ruhun hareketine dalgalarla tepki verir. Renk paleti tüm tayfı kullanır ve zamanla sürekli birbirine karışır.
-        // İki doku: kaplama (yumuşak, doğrusal süzgeç) ve döküm zamanı (16 bit, en yakın süzgeç). Büyüme shader'da zamandan hesaplanır;
-        // böylece doku yalnız yeni boya döküldüğünde güncellenir (takılma yok). Uzaktaki boya donuk ve sakin durur (titreşim yok);
-        // ayrıntı uzaklıkla ve ekran türeviyle yumuşar. Renk aileleri şehrin bölgelerine ve döküm anına göre değişir; parlaklık
-        // hiçbir zaman binaların eserlerini geçmez.
         const PAINT_FS = `
-            uniform sampler2D uMask; uniform sampler2D uStamp; uniform float uExt; uniform float uTime; uniform float uClock; uniform vec3 uSun; uniform vec3 uSunCol; uniform float uNight;
-            uniform vec3 uSpirit; uniform float uMove;
+            uniform sampler2D uMask; uniform float uExt; uniform float uTime; uniform vec3 uSun; uniform vec3 uSunCol; uniform float uNight; uniform vec3 uSpirit;
             varying vec3 vW; varying vec3 vN;
             ${GLSL_NOISE}
-            vec3 hsv(float h, float s, float v){ vec3 k = clamp(abs(fract(h + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0); return v * mix(vec3(1.0), k, s); }
+            // 10 duraklı, doygunluğu ve parlaklığı kısılmış zarif palet: lacivert, petrol, adaçayı, krem, hardal, kiremit, gül, mürdüm, çivit, gök
+            vec3 pour(float t){
+                t = fract(t); float s = t * 10.0; float f = smoothstep(0.12, 0.88, fract(s));
+                vec3 a, b;
+                if (s < 1.0) { a = vec3(0.07, 0.15, 0.36); b = vec3(0.06, 0.38, 0.44); }
+                else if (s < 2.0) { a = vec3(0.06, 0.38, 0.44); b = vec3(0.40, 0.52, 0.43); }
+                else if (s < 3.0) { a = vec3(0.40, 0.52, 0.43); b = vec3(0.80, 0.76, 0.68); }
+                else if (s < 4.0) { a = vec3(0.80, 0.76, 0.68); b = vec3(0.72, 0.52, 0.18); }
+                else if (s < 5.0) { a = vec3(0.72, 0.52, 0.18); b = vec3(0.62, 0.28, 0.20); }
+                else if (s < 6.0) { a = vec3(0.62, 0.28, 0.20); b = vec3(0.64, 0.30, 0.42); }
+                else if (s < 7.0) { a = vec3(0.64, 0.30, 0.42); b = vec3(0.30, 0.15, 0.36); }
+                else if (s < 8.0) { a = vec3(0.30, 0.15, 0.36); b = vec3(0.18, 0.20, 0.50); }
+                else if (s < 9.0) { a = vec3(0.18, 0.20, 0.50); b = vec3(0.34, 0.55, 0.68); }
+                else { a = vec3(0.34, 0.55, 0.68); b = vec3(0.07, 0.15, 0.36); }
+                return mix(a, b, f);
+            }
+            vec2 cellEdge(vec2 p){
+                vec2 i = floor(p), f = fract(p); float d1 = 8.0, d2 = 8.0;
+                for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+                    vec2 g = vec2(float(x), float(y)); vec2 o = vec2(qh(i + g), qh(i + g + 17.3));
+                    float d = length(g + o - f); if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;
+                }
+                return vec2(d1, d2 - d1);
+            }
             void main(){
                 vec2 uv = vW.xz / (2.0 * uExt) + 0.5;
-                float cov = texture2D(uMask, uv).r;
-                if (cov < 0.02) discard;
-                vec4 st = texture2D(uStamp, uv);
-                float stamp = (st.g * 255.0 * 256.0 + st.b * 255.0) * 0.1;
-                float dtp = uClock - stamp; if (dtp < 0.0) dtp += 6553.6;
-                float age = clamp(dtp / 3.2, 0.0, 1.0);
-                float dist = length(vW - cameraPosition);
-                float near = 1.0 - smoothstep(45.0, 130.0, dist);
-                float tA = uTime * near;
-                vec2 p = vW.xz * 0.14;
-                float dsp = length(vW.xz - uSpirit.xz);
-                float ripple = sin(dsp * 1.1 - uTime * 4.0) * exp(-dsp * 0.08) * uMove * near;
-                float finger = qfbm(p * 1.7 + vec2(tA * 0.05, -tA * 0.04));
-                float grow = smoothstep(0.0, 1.0, age);
-                float front = cov * (0.25 + 0.95 * grow) + (finger - 0.5) * 0.22 * mix(1.0, 0.35, grow);
-                if (front < 0.42) discard;
-                float t = tA * (0.012 + 0.03 * (1.0 - age));
-                vec2 q = vec2(qfbm(p + vec2(0.0, t)), qfbm(p + vec2(5.2, 1.3) - t));
-                vec2 r = vec2(qfbm(p + 2.6 * q + vec2(1.7, 9.2) + ripple * 0.12), qfbm(p + 2.6 * q + vec2(8.3, 2.8)));
-                float f = qfbm(p + 3.0 * r);
-                // bölgesel renk aileleri + döküm anına göre kayma: her yerde farklı, zamanla birbirine karışan tonlar
-                float fam = qn(vW.xz * 0.004) * 1.6 + stamp * 0.0021;
-                float h1 = fract(fam + f * 0.95 + r.x * 0.55 + q.y * 0.3), h2 = fract(h1 + 0.18 + 0.15 * sin(f * 6.0 + stamp * 0.01)), h3 = fract(h1 + 0.5);
-                vec3 c1 = hsv(h1, 0.66, 0.74), c2 = hsv(h2, 0.58, 0.8), c3 = hsv(h3, 0.4, 0.66);
-                vec3 col = mix(c1, c2, smoothstep(0.35, 0.65, r.y));
-                col = mix(col, c3, smoothstep(0.62, 0.92, q.x) * 0.45);
-                // ince beyaz damarlar (akrilik döküm hücreleri) — uzaklıkla ve piksel boyutuyla yumuşar
-                float vein = abs(fract(f * 3.5 + r.x * 1.2) - 0.5);
-                float w = max(fwidth(f * 3.5) * 1.5, 0.015);
-                float lace = (1.0 - smoothstep(0.0, w + 0.02, vein)) * near * smoothstep(0.35, 0.7, f + 0.15);
-                col = mix(col, vec3(0.9, 0.88, 0.84), lace * 0.55);
-                float rim = smoothstep(0.58, 0.43, front);
-                col = mix(col, col * 0.6, rim * 0.6);
-                vec3 N = normalize(vN);
+                float m = texture2D(uMask, uv).r;
+                vec2 p = vW.xz * 0.062;
+                float edgeN = qn(p * 3.1) * 0.6 + qn(p * 9.0) * 0.4;
+                float mm = m + (edgeN - 0.5) * 0.42;
+                if (mm < 0.5) discard;
+                float dist = length(vW - cameraPosition), near = 1.0 - smoothstep(90.0, 260.0, dist);
+                float t = uTime * 0.018 * (0.15 + 0.85 * near);
+                vec2 q = vec2(qfbm(p + vec2(0.0, t)), qfbm(p + vec2(5.2, 1.3) - t * 0.8));
+                vec2 r = vec2(qfbm(p + 3.2 * q + vec2(1.7, 9.2) + t * 0.3), qfbm(p + 3.2 * q + vec2(8.3, 2.8)));
+                float f = qfbm(p + 3.6 * r);
+                // bölge: şehrin her köşesi paletin başka bir bölümünden başlar → her yerde farklı renk uyumu
+                float region = qn(p * 0.21) * 2.0 + qn(vW.xz * 0.0045 + 3.1) * 3.0;
+                vec3 col = pour(f * 1.5 + r.x * 0.8 + region);
+                vec3 col2 = pour(f * 1.5 + r.x * 0.8 + region + 0.27);
+                col = mix(col, col2, smoothstep(0.45, 0.62, r.y));
+                vec3 col3 = pour(region * 0.5 + q.x + 0.5);
+                col = mix(col, col3, smoothstep(0.62, 0.8, r.x) * 0.45);
+                vec2 ce = cellEdge(p * 1.7 + r * 1.6);
+                float aa = fwidth(ce.y) + 0.004;
+                float lace = smoothstep(0.09 + aa, 0.0, ce.y) * smoothstep(0.35, 0.75, f + 0.2) * (0.35 + 0.65 * near);
+                float cellCore = smoothstep(0.35, 0.0, ce.x) * 0.3;
+                col = mix(col, vec3(0.86, 0.84, 0.78), lace * 0.6);
+                col = mix(col, col * vec3(0.62, 0.66, 0.86), cellCore * (1.0 - lace));
+                float rim = smoothstep(0.62, 0.5, mm);
+                col = mix(col, col * 0.55, rim * 0.7);
+                vec3 N = normalize(vN + vec3((qn(p * 14.0) - 0.5) * 0.12, 0.0, (qn(p * 14.0 + 7.0) - 0.5) * 0.12));
                 vec3 V = normalize(cameraPosition - vW);
-                float dif = 0.8 + 0.2 * max(dot(N, uSun), 0.0);
-                float spec = pow(max(dot(reflect(-uSun, N), V), 0.0), 90.0) * 0.18 * (1.0 - uNight) * near;
-                vec3 Ls = uSpirit + vec3(0.0, 1.2, 0.0) - vW; float ds = length(Ls);
-                col = col * dif * mix(0.95, 0.72, uNight) + uSunCol * spec + vec3(0.7, 0.85, 1.0) * exp(-ds * ds / 70.0) * 0.18;
-                gl_FragColor = vec4(min(col, vec3(0.85)), 1.0);
+                float dif = 0.8 + 0.14 * max(dot(N, uSun), 0.0);
+                float spec = pow(max(dot(reflect(-uSun, N), V), 0.0), 90.0) * (1.0 - uNight);
+                float fr = pow(1.0 - max(dot(N, V), 0.0), 4.0);
+                vec3 Ls = uSpirit + vec3(0.0, 1.5, 0.0) - vW; float ds = length(Ls);
+                col = col * dif * mix(0.88, 0.7, uNight) + uSunCol * spec * 0.3 + vec3(0.6, 0.7, 0.85) * fr * 0.08 + vec3(0.7, 0.85, 1.0) * exp(-ds * ds / 60.0) * 0.12;
+                gl_FragColor = vec4(min(col, vec3(0.78)), 1.0);
             }`;
         const PAINT = {
-            geos: [], N: 512, EXT: 600, cov: null, stamp: null, texC: null, texS: null, mesh: null, last: null, upT: 0, saveT: 0, changed: false, dirty: false, key: 'sucity.paint.v3', clock: 0,
+            geos: [], N: IS_MOBILE || LOW_MEM ? 1024 : 1536, EXT: 615, canvas: null, ctx: null, tex: null, mesh: null, last: null, dirty: false, upT: 0, saveT: 0, changed: false, key: 'sucity.paint.v5', data: null, dataDirty: true,
             init() {
-                const N = this.N;
-                this.cov = new Uint8Array(N * N * 4); this.stamp = new Uint8Array(N * N * 4);
-                this.texC = new THREE.DataTexture(this.cov, N, N, THREE.RGBAFormat); this.texC.magFilter = THREE.LinearFilter; this.texC.minFilter = THREE.LinearFilter; this.texC.needsUpdate = true;
-                this.texS = new THREE.DataTexture(this.stamp, N, N, THREE.RGBAFormat); this.texS.magFilter = THREE.NearestFilter; this.texS.minFilter = THREE.NearestFilter; this.texS.needsUpdate = true;
-                this.load();
+                const c = this.canvas = document.createElement('canvas'); c.width = c.height = this.N;
+                this.ctx = c.getContext('2d', { willReadFrequently: true }); this.ctx.fillStyle = '#000'; this.ctx.fillRect(0, 0, this.N, this.N);
+                this.tex = new THREE.CanvasTexture(c); this.tex.flipY = false; this.tex.minFilter = THREE.LinearFilter; this.tex.magFilter = THREE.LinearFilter; this.tex.generateMipmaps = false;
+                try { const d = localStorage.getItem(this.key); if (d) { const im = new Image(); im.onload = () => { this.ctx.drawImage(im, 0, 0, this.N, this.N); this.tex.needsUpdate = true; this.dataDirty = true; }; im.src = d; } } catch (e) {}
                 const parts = this.geos.map(g0 => { const g = g0.index ? g0.toNonIndexed() : g0; g.computeVertexNormals(); return g; });
                 const total = parts.reduce((n, g) => n + g.attributes.position.array.length, 0);
                 const P = new Float32Array(total), Nn = new Float32Array(total); let off = 0;
                 parts.forEach(g => { P.set(g.attributes.position.array, off); Nn.set(g.attributes.normal.array, off); off += g.attributes.position.array.length; });
                 const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(P, 3)); g.setAttribute('normal', new THREE.BufferAttribute(Nn, 3));
                 this.mat = new THREE.ShaderMaterial({
-                    uniforms: { uMask: { value: this.texC }, uStamp: { value: this.texS }, uExt: { value: this.EXT }, uTime: U.time, uClock: { value: 0 }, uSun: { value: LIGHT }, uSunCol: { value: SUN_COL }, uNight: U.night, uSpirit: { value: new THREE.Vector3() }, uMove: { value: 0 } },
-                    vertexShader: PAINT_VS, fragmentShader: PAINT_FS, extensions: { derivatives: true },
-                    // camın ardından çizilir: kuş bakışında bile cam yolun altında kalmaz (derinlik çakışması yok)
-                    transparent: true, depthWrite: true, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8
+                    uniforms: { uMask: { value: this.tex }, uExt: { value: this.EXT }, uTime: U.time, uSun: { value: LIGHT }, uSunCol: { value: SUN_COL }, uNight: U.night, uSpirit: { value: new THREE.Vector3() } },
+                    vertexShader: PAINT_VS, fragmentShader: PAINT_FS, extensions: { derivatives: true }, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4
                 });
                 this.mesh = new THREE.Mesh(g, this.mat); this.mesh.renderOrder = 7; this.mesh.frustumCulled = false; this.mesh.matrixAutoUpdate = false;
                 scene.add(this.mesh);
             },
             px(v) { return (v / (2 * this.EXT) + 0.5) * this.N; },
             dab(x, z) {
-                const N = this.N, X = this.px(x), Z = this.px(z), r = (ROAD_HALF + 2.5) / (2 * this.EXT) * N;
-                const tq = Math.floor((this.clock * 10) % 65536), hi = tq >> 8, lo = tq & 255;
-                const x0 = Math.max(0, Math.floor(X - r)), x1 = Math.min(N - 1, Math.ceil(X + r)), z0 = Math.max(0, Math.floor(Z - r)), z1 = Math.min(N - 1, Math.ceil(Z + r));
-                for (let zz = z0; zz <= z1; zz++) for (let xx = x0; xx <= x1; xx++) {
-                    const d = Math.hypot(xx + 0.5 - X, zz + 0.5 - Z) / r; if (d >= 1) continue;
-                    const v = Math.round(255 * Math.pow(1 - d * d, 0.6)), i = (zz * N + xx) * 4;
-                    if (this.cov[i] < v) { if (this.cov[i] === 0) { this.stamp[i + 1] = hi; this.stamp[i + 2] = lo; this.stamp[i + 3] = 255; } this.cov[i] = v; this.cov[i + 3] = 255; }
-                }
+                const c = this.ctx, X = this.px(x), Z = this.px(z), r = (ROAD_HALF + 3.5) / (2 * this.EXT) * this.N;
+                const g = c.createRadialGradient(X, Z, 0, X, Z, r);
+                g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.55, 'rgba(255,255,255,0.95)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+                c.fillStyle = g; c.beginPath(); c.arc(X, Z, r, 0, Math.PI * 2); c.fill();
             },
             stroke(x, z) {
-                if (!this.cov) return;
+                if (!this.ctx) return;
                 if (!this.last) { this.last = { x, z }; this.dab(x, z); this.dirty = true; return; }
                 const dx = x - this.last.x, dz = z - this.last.z, d = Math.hypot(dx, dz);
-                if (d < 1.5) return;
+                if (d < 1.6) return;
                 if (d > 60) { this.last = { x, z }; this.dab(x, z); this.dirty = true; return; }
-                const n = Math.ceil(d / 1.5);
+                const n = Math.ceil(d / 1.6);
                 for (let k = 1; k <= n; k++) this.dab(this.last.x + dx * k / n, this.last.z + dz * k / n);
                 this.last = { x, z }; this.dirty = true; this.changed = true;
             },
-            update(dt, speed) {
-                if (!this.cov) return;
-                this.clock = (this.clock + dt) % 6553.6; this.upT += dt; this.saveT += dt;
-                this.mat.uniforms.uClock.value = this.clock;
-                if (car) this.mat.uniforms.uSpirit.value.copy(car.position);
-                this.mat.uniforms.uMove.value += (Math.min(1, Math.abs(speed || 0) / 8) - this.mat.uniforms.uMove.value) * Math.min(1, dt * 3);
-                if (this.dirty && this.upT > (IS_MOBILE ? 0.2 : 0.12)) { this.texC.needsUpdate = true; this.texS.needsUpdate = true; this.dirty = false; this.upT = 0; }
-                if (this.changed && this.saveT > 8) this.save();
+            update(dt) {
+                this.upT += dt; this.saveT += dt;
+                if (this.dirty && this.upT > (IS_MOBILE ? 0.25 : 0.15)) { this.tex.needsUpdate = true; this.dirty = false; this.upT = 0; this.dataDirty = true; }
+                if (this.mat && car) this.mat.uniforms.uSpirit.value.copy(car.position);
+                if (this.changed && this.saveT > 6) { this.save(); }
             },
-            save() {
-                this.saveT = 0; this.changed = false;
-                try {
-                    const c = document.createElement('canvas'); c.width = c.height = this.N; const ctx = c.getContext('2d'); const im = ctx.createImageData(this.N, this.N);
-                    for (let i = 0; i < this.cov.length; i += 4) { im.data[i] = this.cov[i]; im.data[i + 1] = this.stamp[i + 1]; im.data[i + 2] = this.stamp[i + 2]; im.data[i + 3] = 255; }
-                    ctx.putImageData(im, 0, 0); localStorage.setItem(this.key, c.toDataURL('image/png'));
-                } catch (e) {}
+            save() { this.saveT = 0; this.changed = false; try { localStorage.setItem(this.key, this.canvas.toDataURL('image/png')); } catch (e) {} },
+            clear() { this.ctx.fillStyle = '#000'; this.ctx.fillRect(0, 0, this.N, this.N); this.tex.needsUpdate = true; this.last = null; this.dataDirty = true; try { localStorage.removeItem(this.key); } catch (e) {} },
+            at(x, z) {
+                if (!this.ctx) return 0;
+                if (this.dataDirty || !this.data) { try { this.data = this.ctx.getImageData(0, 0, this.N, this.N).data; } catch (e) { return 0; } this.dataDirty = false; }
+                const X = Math.floor(this.px(x)), Z = Math.floor(this.px(z));
+                if (X < 0 || Z < 0 || X >= this.N || Z >= this.N) return 0;
+                return this.data[(Z * this.N + X) * 4] / 255;
             },
-            load() {
-                try {
-                    const d = localStorage.getItem(this.key); if (!d) return;
-                    const im = new Image(); im.onload = () => {
-                        const c = document.createElement('canvas'); c.width = c.height = this.N; const ctx = c.getContext('2d'); ctx.drawImage(im, 0, 0); const px = ctx.getImageData(0, 0, this.N, this.N).data;
-                        // yüklenen boya tamamen yayılmış sayılır: döküm zamanı şimdiden yeterince geride
-                        const old = Math.floor(((this.clock - 60 + 6553.6) % 6553.6) * 10);
-                        for (let i = 0; i < px.length; i += 4) if (px[i] > 0) { this.cov[i] = px[i]; this.cov[i + 3] = 255; this.stamp[i + 1] = old >> 8; this.stamp[i + 2] = old & 255; this.stamp[i + 3] = 255; }
-                        this.texC.needsUpdate = true; this.texS.needsUpdate = true;
-                    };
-                    im.src = d;
-                } catch (e) {}
-            },
-            clear() { this.cov.fill(0); this.stamp.fill(0); this.texC.needsUpdate = true; this.texS.needsUpdate = true; this.last = null; try { localStorage.removeItem(this.key); } catch (e) {} },
-            at(x, z) { const X = Math.floor(this.px(x)), Z = Math.floor(this.px(z)); if (X < 0 || Z < 0 || X >= this.N || Z >= this.N) return 0; return this.cov[(Z * this.N + X) * 4] / 255; },
             coverage() {
-                if (!this.cov) return 0; let hit = 0, n = 0;
+                if (!this.ctx) return 0; let hit = 0, n = 0;
                 for (let i = 0; i < roadPts.length; i += 3) { n++; if (this.at(roadPts[i].x, roadPts[i].z) > 0.5) hit++; }
                 return n ? hit / n : 0;
             }
@@ -2178,145 +2374,73 @@ canvas{touch-action:none}
                 vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; vN = normalize(mat3(modelMatrix) * normal);
                 vec4 mv = viewMatrix * w; vVP = mv.xyz; vFogDepth = -mv.z; vProjY = projectionMatrix[1][1]; gl_Position = projectionMatrix * mv;
             }`;
+        // İleri (forward) sıvı cam: arka plan geçişi yok, ekran uzayı örneklemesi yok -> hiçbir açıdan siyahlaşma/titreme olmaz ve
+        // çok daha hızlıdır. Işık fiziği korunur: Fresnel'e göre artan yansıma (sabit, saate göre pişirilmiş canlı küp harita),
+        // kenarlarda kalınlaşan cam gövdesi (bezel), kenarda ışığın tayfa ayrışması, Apple tarzı iki yönlü parlama, güneş ve ruh ışığı.
+        // Karışım önceden çarpılmış alfa ile yapılır: arkadaki gerçek görüntü camdan bozulmadan görünür, yansıma üstüne eklenir.
         const LG_FS = `
-            uniform sampler2D uBg; uniform sampler2D uBgBlur; uniform samplerCube uEnv; uniform vec2 uRes; uniform float uLive;
-            uniform float uThick; uniform float uFrost; uniform float uDisp; uniform vec3 uTint; uniform float uTintA; uniform float uRefl; uniform float uGlare;
+            uniform samplerCube uEnv; uniform float uTintA; uniform vec3 uTint; uniform float uRefl; uniform float uGlare; uniform float uFrost;
             uniform vec3 uSun; uniform vec3 uSunCol; uniform float uNight; uniform float uTime; uniform vec3 uFogColor; uniform float uFogD;
-            uniform sampler2D uBgDepth; uniform float uNear; uniform float uFar; uniform vec3 uSpirit; uniform float uCutable;
-            uniform float uCutOn; uniform vec3 uCutA; uniform vec3 uCutB; uniform float uCutR;
+            uniform vec3 uSpirit; uniform float uCutable; uniform float uCutOn; uniform vec3 uCutA; uniform vec3 uCutB; uniform float uCutR;
             varying vec3 vW; varying vec3 vN; varying vec3 vVP; varying float vFogDepth; varying float vProjY;
-            float linZ(float d){ return uNear * uFar / (uFar - d * (uFar - uNear)); }
-            vec3 bg(vec2 uv, float frost){ uv = clamp(uv, vec2(0.002), vec2(0.998)); return mix(texture2D(uBg, uv).rgb, texture2D(uBgBlur, uv).rgb, frost); }
             void main(){
                 if (uCutOn > 0.5 && uCutable > 0.5) { vec3 ab = uCutB - uCutA; float t = dot(vW - uCutA, ab) / dot(ab, ab); if (t > 0.0 && t < 1.0 && length(vW - (uCutA + ab * t)) < mix(1.5, uCutR, t)) discard; }
                 vec3 N = normalize(vN); if (!gl_FrontFacing) N = -N;
                 vec3 V = normalize(cameraPosition - vW);
                 vec3 Nv = normalize((viewMatrix * vec4(N, 0.0)).xyz);
                 float ndv = clamp(dot(N, V), 0.0, 1.0);
-                float bezel = pow(1.0 - ndv, 1.6);
-                // kırılma: görünüm uzayındaki normalin ekran düzlemindeki izdüşümü yönünde, kenara yaklaştıkça güçlenen ofset
-                float scale = vProjY * 0.5 / max(-vVP.z, 0.5);
-                vec2 off = -Nv.xy * uThick * (0.35 + 2.4 * bezel) * scale;
-                vec2 uv = gl_FragCoord.xy / uRes;
-                // camın önündeki bir nesneyi camın içine "kırmamak" için derinlik testi: örneklenen nokta camdan yakınsa ofseti azalt
-                if (uLive > 0.5) { float zs = linZ(texture2D(uBgDepth, clamp(uv + off, 0.002, 0.998)).r); if (zs < -vVP.z - 0.3) off *= 0.0; }
-                float fr = clamp(uFrost + bezel * 0.25, 0.0, 1.0);
-                vec3 col;
-                col.r = bg(uv + off * (1.0 - uDisp * 2.0), fr).r;
-                col.g = bg(uv + off, fr).g;
-                col.b = bg(uv + off * (1.0 + uDisp * 2.0), fr).b;
-                // ton ve parlaklık (Apple camındaki hafif süt beyazı aydınlık)
-                col = mix(col, col * uTint, uTintA * 4.0) * (1.0 + 0.05 * (1.0 - uNight)) + uTint * 0.018;
+                float bezel = pow(1.0 - ndv, 1.7);
+                float F = 0.04 + 0.96 * pow(1.0 - ndv, 5.0);
+                F = clamp(F * uRefl + bezel * 0.16, 0.0, 0.9);
                 vec3 R = reflect(-V, N);
                 vec3 env = textureCube(uEnv, R).rgb;
-                float F = 0.04 + 0.96 * pow(1.0 - ndv, 5.0);
-                F = clamp(F * uRefl + bezel * 0.18, 0.0, 0.92);
-                vec3 live = mix(col, env, F);
-                // iki yönlü parlama: normal yönünün ekrandaki açısı ışık açısına (sol üst / sağ alt) yaklaştıkça
                 float ang = atan(Nv.y, Nv.x);
-                float ga = 2.356 + 0.15 * sin(uTime * 0.2);
-                float glare = pow(abs(cos(ang - ga)), 14.0) * smoothstep(0.2, 0.9, bezel);
+                float glare = pow(abs(cos(ang - 2.356)), 14.0) * smoothstep(0.25, 0.9, bezel);
                 vec3 glareCol = mix(vec3(1.0, 0.98, 0.94), uSunCol, 0.25);
-                live += glareCol * glare * uGlare * (0.75 - 0.45 * uNight);
-                // iç kenar gölgesi (parlamanın hemen içindeki koyu ince bant camı hacimli gösterir)
-                live *= 1.0 - 0.14 * smoothstep(0.45, 0.85, bezel) * (1.0 - glare);
+                vec3 disp = 0.5 + 0.5 * cos(6.2831 * (bezel * 1.4 + ang * 0.16 + vec3(0.0, 0.33, 0.67)));
                 vec3 H = normalize(uSun + V);
-                live += uSunCol * pow(max(dot(N, H), 0.0), 520.0) * 3.0 * (1.0 - uNight) * step(0.0, uSun.y);
-                // ruhun ışığı: gerçek zamanlı, cam yüzeyde yumuşak bir ışıltı ve yansıma noktası
-                vec3 Ls = uSpirit + vec3(0.0, 1.2, 0.0) - vW; float ds = length(Ls); Ls /= max(ds, 1e-3);
-                float sp = exp(-ds * ds / 90.0);
-                live += vec3(0.72, 0.86, 1.0) * (sp * 0.35 + pow(max(dot(N, normalize(Ls + V)), 0.0), 120.0) * exp(-ds / 14.0) * 1.2) * (0.4 + 0.6 * uNight);
-                vec3 outC; float a;
-                if (uLive > 0.5) { outC = live; a = 1.0; }
-                else { outC = mix(uTint * 0.22, env, F) + glareCol * glare * uGlare * 0.5; a = mix(0.28, 0.9, F); }
+                float sunSp = pow(max(dot(N, H), 0.0), 600.0) * 3.0 * (1.0 - uNight) * step(0.0, uSun.y);
+                vec3 Ls = uSpirit + vec3(0.0, 1.6, 0.0) - vW; float ds = length(Ls); Ls /= max(ds, 1e-3);
+                float spirit = exp(-ds * ds / 110.0) * 0.28 + pow(max(dot(N, normalize(Ls + V)), 0.0), 140.0) * exp(-ds / 16.0) * 1.1;
+                vec3 col = env * F + uTint * (0.025 + uFrost * 0.06) + disp * bezel * 0.05 + glareCol * glare * uGlare * (0.7 - 0.4 * uNight) + uSunCol * sunSp + vec3(0.72, 0.86, 1.0) * spirit * (0.45 + 0.55 * uNight);
+                float a = clamp(uTintA * 0.8 + uFrost * 0.35 + F * 0.55 + bezel * 0.28, 0.06, 0.92);
                 float fogF = 1.0 - exp(-uFogD * uFogD * vFogDepth * vFogDepth);
-                outC = mix(outC, uFogColor, fogF);
-                gl_FragColor = vec4(outC, a);
+                col = mix(col, uFogColor * a, fogF);
+                gl_FragColor = vec4(col, a);
             }`;
         const LG = {
-            meshes: [], rt: null, a: null, b: null, w: 0, h: 0, scale: IS_MOBILE ? (LOW_MEM ? 0.33 : 0.42) : 0.75, enabled: !SAFE_MODE,
-            u: null,
+            meshes: [], enabled: true, scale: 1, u: null,
             init() {
                 this.u = {
-                    uBg: { value: null }, uBgBlur: { value: null }, uEnv: { value: null }, uRes: { value: new THREE.Vector2(1, 1) }, uLive: { value: 0 },
+                    uEnv: { value: LIVE_ENV.front.texture }, uLive: { value: 0 },
                     uSun: { value: LIGHT }, uSunCol: { value: SUN_COL }, uNight: U.night, uTime: U.time, uFogColor: { value: new THREE.Color() }, uFogD: { value: 0.0002 },
-                    uBgDepth: { value: null }, uNear: { value: 0.1 }, uFar: { value: 10000 }, uSpirit: { value: new THREE.Vector3(0, -999, 0) },
-                    uCutOn: CUT.on, uCutA: CUT.a, uCutB: CUT.b, uCutR: CUT.r
+                    uSpirit: { value: new THREE.Vector3(0, -999, 0) }, uCutOn: CUT.on, uCutA: CUT.a, uCutB: CUT.b, uCutR: CUT.r
                 };
-                this.u.uEnv.value = LIVE_ENV.front.texture;
             },
-            ensure() {
-                const W = renderer.domElement.width, H = renderer.domElement.height;
-                const w = Math.max(16, Math.floor(W * this.scale)), h = Math.max(16, Math.floor(H * this.scale));
-                if (this.rt && this.w === w && this.h === h) return;
-                [this.rt, this.a, this.b].forEach(t => t && t.dispose());
-                this.w = w; this.h = h;
-                this.rt = new THREE.WebGLRenderTarget(w, h, { encoding: THREE.sRGBEncoding });
-                this.rt.depthTexture = new THREE.DepthTexture(w, h); this.rt.depthTexture.type = THREE.UnsignedIntType;
-                const bw = Math.max(16, Math.floor(w / 2)), bh = Math.max(16, Math.floor(h / 2));
-                this.a = new THREE.WebGLRenderTarget(bw, bh); this.b = new THREE.WebGLRenderTarget(bw, bh);
-                this.u.uBg.value = this.rt.texture; this.u.uBgBlur.value = this.b.texture; this.u.uBgDepth.value = this.rt.depthTexture;
-            },
-            // bgPass + vBlur + hBlur
-            render(cam) {
-                if (!this.enabled || !this.meshes.length) { this.u.uLive.value = 0; return; }
-                this.ensure(); ensureFocus(true);
-                const vis = this.meshes.filter(m => m.visible); vis.forEach(m => m.visible = false);
-                this.u.uLive.value = 0;
-                renderer.setRenderTarget(this.rt); renderer.render(scene, cam);
-                vis.forEach(m => m.visible = true);
-                const a = this.a, b = this.b;
-                blurMat.uniforms.tSrc.value = this.rt.texture; blurMat.uniforms.uDir.value.set(0, 1.4 / a.height); fsPass(blurMat, a);
-                blurMat.uniforms.tSrc.value = a.texture; blurMat.uniforms.uDir.value.set(1.4 / a.width, 0); fsPass(blurMat, b);
-                renderer.setRenderTarget(null);
-                this.u.uRes.value.set(renderer.domElement.width, renderer.domElement.height);
-                this.u.uFogColor.value.copy(scene.fog.color); this.u.uFogD.value = scene.fog.density;
-                this.u.uNear.value = cam.near; this.u.uFar.value = cam.far; if (car) this.u.uSpirit.value.copy(car.position);
-                if (MAT.mirrorWater && mirror) MAT.mirrorWater.uniforms.uMirror.value = mirror.rt.texture;
-                this.u.uLive.value = 1;
-            },
-            off() { if (this.u) this.u.uLive.value = 0; }
+            render() { this.u.uFogColor.value.copy(scene.fog.color); this.u.uFogD.value = scene.fog.density; if (car) this.u.uSpirit.value.copy(car.position); },
+            off() {}
         };
         function lgMaterial(o) {
             const u = Object.assign({}, LG.u, {
                 uThick: { value: o.thick }, uFrost: { value: o.frost }, uDisp: { value: o.disp }, uTint: { value: new THREE.Color(o.tint) }, uTintA: { value: o.tintA },
                 uRefl: { value: o.refl }, uGlare: { value: o.glare !== undefined ? o.glare : 1.0 }, uCutable: { value: o.cut ? 1 : 0 }
             });
-            const m = new THREE.ShaderMaterial({ uniforms: u, vertexShader: LG_VS, fragmentShader: LG_FS, transparent: true, depthWrite: true, side: THREE.DoubleSide });
+            const m = new THREE.ShaderMaterial({ uniforms: u, vertexShader: LG_VS, fragmentShader: LG_FS, transparent: true, depthWrite: false, side: THREE.DoubleSide,
+                blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor });
             m.userData.lg = true; m.userData.uv = 0;
             return m;
         }
-        // merkez kürenin ayna yarısı için küre merkezinde ayrı bir canlı küp harita
-        const SPH_ENV = {
-            size: IS_MOBILE ? 64 : 256, front: null, back: null, cam: null, face: 0, every: 1, tick: 0, hour: null, busy: false,
-            init() {
-                const mk = () => new THREE.WebGLCubeRenderTarget(this.size, { format: THREE.RGBAFormat, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter, encoding: THREE.sRGBEncoding });
-                this.front = mk(); this.back = mk(); this.cam = new THREE.CubeCamera(1, 4000, this.back);
-                MAT.sphereMirror.envMap = this.front.texture; MAT.sphereMirror.needsUpdate = true;
-            },
-            update(force) {
-                if (!this.cam || !SPHERE) return;
-                if (!this.busy) {
-                    const dh = this.hour === null ? 99 : Math.abs(((TOD.hour - this.hour + 36) % 24) - 12);
-                    if (!force && 12 - dh < 0.12 && this.hour !== null) return;
-                    this.busy = true; this.hour = TOD.hour; this.face = 0;
-                    this.cam.position.set(0, SPHERE.baseY, 0); this.cam.updateMatrixWorld(true);
-                }
-                const hid = [SPHERE.g, ocean, seabed].concat(underwaterOnly, hideInEnv).filter(o => o && o.visible); hid.forEach(o => o.visible = false);
-                const skyPos = skyMesh.position.clone(); skyMesh.position.copy(this.cam.position);
-                const lv = LG.u.uLive.value; LG.u.uLive.value = 0;
-                renderer.setRenderTarget(this.back, this.face); renderer.render(scene, this.cam.children[this.face]); renderer.setRenderTarget(null);
-                LG.u.uLive.value = lv;
-                skyMesh.position.copy(skyPos); hid.forEach(o => o.visible = true);
-                if (++this.face === 6) { this.face = 0; this.busy = false; const t = this.front; this.front = this.back; this.back = t; MAT.sphereMirror.envMap = this.front.texture; }
-            }
-        };
+        const SPH_ENV = { init() {}, update() {} };
 
         // ===================== GERÇEK ZAMANLI YANSIMA (küp harita, çift tampon) =====================
         // Şehir, kameranın olduğu yerden altı yöne sırayla çizilir; her karede bir yüz. Cam ve ayna yüzeyler hazır olan tamponu okur,
         // çizim diğerine yapılır (okuma/yazma döngüsü olmaz). Altı yüz bitince tamponlar yer değiştirir.
         const LIVE_ENV = {
-            size: IS_MOBILE ? 96 : 256, front: null, back: null, cam: null, face: 0, mats: [], every: IS_MOBILE ? 3 : 1, tick: 0, pos: new THREE.Vector3(),
+            size: SAFE_MODE ? 64 : IS_MOBILE ? [64, 128, 128][Math.min(2, Q.tier)] : (Q.tier >= 3 ? 512 : 256), front: null, back: null, cam: null, face: 0, mats: [], every: IS_MOBILE ? 3 : 1, tick: 0, pos: new THREE.Vector3(),
+            // v3 · odak: incelenen binanın önünden çizilir → seçili ve yakın binalarda yansıma yerel ve doğru olur
+            want: new THREE.Vector3(0, 46, 0), skipped: 0,
+            focus(x, y, z) { this.want.set(x, y, z); },
+            unfocus() { this.want.set(0, 46, 0); },
             init() {
                 const mk = () => new THREE.WebGLCubeRenderTarget(this.size, { format: THREE.RGBAFormat, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter, encoding: THREE.sRGBEncoding });
                 this.front = mk(); this.back = mk();
@@ -2328,11 +2452,14 @@ canvas{touch-action:none}
             update(cam, force) {
                 if (!this.cam) return;
                 if (!this.busy) {
-                    const dh = this.hour === null ? 99 : Math.abs(((TOD.hour - this.hour + 36) % 24) - 12);
-                    if (!force && 12 - dh < 0.12 && this.hour !== null) return;
+                    const dh = this.hour === null ? 99 : Math.abs(((TOD.hour - this.hour + 36) % 24) - 12), moved = this.pos.distanceToSquared(this.want) > 30 * 30;
+                    if (!force && !moved && 12 - dh < 0.12 && this.hour !== null) return;
                     this.busy = true; this.hour = TOD.hour; this.face = 0;
-                    this.pos.set(0, 46, 0); this.cam.position.copy(this.pos); this.cam.updateMatrixWorld(true);
+                    this.pos.copy(this.want); this.cam.position.copy(this.pos); this.cam.updateMatrixWorld(true);
                 }
+                // kare bütçesi: yüz çizimi pahalıdır; bu karede zaman yoksa ertele (en fazla 20 kare)
+                if (!force && !BUDGET.ok(5) && this.skipped < 20) { this.skipped++; return; }
+                this.skipped = 0;
                 const fcam = this.cam.children[this.face];
                 const hid = [ocean, seabed, fountainPts].concat(underwaterOnly, hideInEnv).filter(o => o && o.visible);
                 hid.forEach(o => o.visible = false);
@@ -2353,6 +2480,259 @@ canvas{touch-action:none}
             }
         };
         const hideInEnv = [];
+
+        // ===================== v3 · KARE BÜTÇESİ =====================
+        // Her kare başında saat tutulur; pahalı ama ertelenebilir işler (küp yüzü, doku akışı, mini harita) yalnız bütçe kalmışsa yapılır.
+        const BUDGET = { t0: 0, ms: 10, start() { this.t0 = performance.now(); }, used() { return performance.now() - this.t0; }, ok(need) { return this.used() + need < this.ms; } };
+
+        // ===================== v3 · UYARLANABİLİR KALİTE YÖNETİCİSİ =====================
+        // Gerçek kare süresinden (rAF aralığı) p10/p50/p90 hesaplanır. Ekran 30 Hz'e kilitliyse (iPhone düşük güç modu) bu bir
+        // yavaşlık sayılmaz. Kötüleşmede en ucuz kayıptan başlayarak bir kademe düşülür; iyileşme uzun süre sürerse geri alınır.
+        // Bir yükseltme kısa sürede yeniden düşüşe yol açarsa o adım 60 sn kilitlenir (salınım olmaz). Oturan kademe cihaza kaydedilir.
+        const GOV = {
+            prMax: 1, ring: new Float32Array(96), ri: 0, rn: 0, evalT: 0, cool: 4, good: 0, stack: [], lastUp: -1e9, blockUp: 0, stableT: 0, saved: false,
+            mirrorEvery: SAFE_MODE ? 3 : IS_MOBILE ? [3, 2, 1][Math.min(2, Q.tier)] : 1, shadowEvery: IS_MOBILE ? 12 : 6,
+            artFx: SAFE_MODE ? 0 : 1, budgetMs: 21, capped30: false, memTight: false, memT: 0, now: 0, stats: { p10: 0, p50: 0, p90: 0 },
+            sample(dt) {
+                this.now += dt;
+                if (dt > 0.25 || document.hidden) { this.rn = 0; this.ri = 0; return; }
+                this.ring[this.ri] = dt * 1000; this.ri = (this.ri + 1) % this.ring.length; this.rn = Math.min(this.ring.length, this.rn + 1);
+                this.cool = Math.max(0, this.cool - dt); this.evalT += dt; this.stableT += dt;
+                this.memT += dt; if (this.memT > 5) { this.memT = 0; this.checkMemory(); }
+                if (this.evalT < 1.5 || this.rn < 40) return; this.evalT = 0;
+                const a = Array.from(this.ring.subarray(0, this.rn)).sort((x, y) => x - y), q = f => a[Math.min(a.length - 1, Math.floor(a.length * f))];
+                const p10 = q(0.1), p50 = q(0.5), p90 = q(0.9); this.stats = { p10, p50, p90 };
+                this.capped30 = Math.abs(p10 - 33.3) < 2.5 && Math.abs(p50 - 33.3) < 3.5;
+                const budget = (this.capped30 ? 33.3 : 16.67) * 1.28; this.budgetMs = budget;
+                BUDGET.ms = Math.max(6, budget * 0.55);
+                if (this.cool > 0 || ATLAS.on) return;
+                if (p50 > budget || p90 > budget * 1.9) {
+                    this.good = 0;
+                    if (this.now - this.lastUp < 8) this.blockUp = this.now + 60;
+                    if (this.degrade()) { this.cool = 2.5; this.stableT = 0; } else this.cool = 10;
+                } else if (p50 < budget * 0.78 && p90 < budget * 1.15) {
+                    if (++this.good >= 4 && this.now > this.blockUp) { this.good = 0; if (this.upgrade()) { this.lastUp = this.now; this.cool = 5; this.stableT = 0; } }
+                } else this.good = 0;
+                if (!this.saved && this.stableT > 25) this.save();
+            },
+            push(undo) { this.stack.push(undo); return true; },
+            resize() { renderer.setSize(window.innerWidth, window.innerHeight); resizeWaterTargets(); },
+            degrade() {
+                const pr = renderer.getPixelRatio();
+                if (this.mirrorEvery < 3) { this.mirrorEvery++; return this.push(() => { this.mirrorEvery--; }); }
+                if (FEATURES.shadows && this.shadowEvery < 60) { const s = this.shadowEvery; this.shadowEvery = 60; return this.push(() => { this.shadowEvery = s; }); }
+                if (refr.on) { setRefraction(false); return this.push(() => setRefraction(true)); }
+                if (this.artFx > 0.5) { this.artFx = 0.5; return this.push(() => { this.artFx = 1; }); }
+                if (mirror.scale > 0.3) { const s = mirror.scale; mirror.scale = Math.max(0.3, s - 0.1); resizeMirror(); return this.push(() => { mirror.scale = s; resizeMirror(); }); }
+                if (pr > 1.01) { const np = Math.max(1, pr - 0.25); renderer.setPixelRatio(np); this.resize(); return this.push(() => { renderer.setPixelRatio(pr); this.resize(); }); }
+                if (this.artFx > 0) { this.artFx = 0; return this.push(() => { this.artFx = 0.5; }); }
+                return false;
+            },
+            upgrade() {
+                if (this.stack.length) { this.stack.pop()(); return true; }
+                const pr = renderer.getPixelRatio();
+                if (pr < this.prMax - 0.01) { renderer.setPixelRatio(Math.min(this.prMax, pr + 0.25)); this.resize(); return this.push(() => { renderer.setPixelRatio(pr); this.resize(); }); }
+                return false;
+            },
+            save() {
+                this.saved = true;
+                const tier = this.stack.length >= 4 ? Math.max(0, Q.tier - 1) : Q.tier;
+                try { localStorage.setItem('sucity.q.v3', JSON.stringify({ sig: Q.sig, tier, at: Date.now() })); } catch (e) {}
+            },
+            // Chromium: JS yığını sınıra yaklaşırsa yakın çevre yüksek çözünürlükleri bırakılır (hafif sürümler kalır)
+            checkMemory() {
+                const m = performance && performance.memory; if (!m || !m.jsHeapSizeLimit) return;
+                const r = m.usedJSHeapSize / m.jsHeapSizeLimit;
+                if (r > 0.82 && !this.memTight) { this.memTight = true; ART.trim(Math.ceil(ART_NEAR_K / 2)); }
+                else if (r < 0.6) this.memTight = false;
+            }
+        };
+        document.addEventListener('visibilitychange', () => { GOV.rn = 0; GOV.ri = 0; GOV.cool = Math.max(GOV.cool, 2); if (document.hidden) RESUME.save(); });
+
+        // ===================== v3 · KALDIĞIN YERDEN =====================
+        // Grafik belleği tükenip sayfa hafif modda yeniden açıldığında ruh aynı yerde, aynı saatte uyanır (aynı sekme, 3 dk içinde).
+        const RESUME = {
+            key: 'sucity.resume',
+            save() { try { if (car) sessionStorage.setItem(this.key, JSON.stringify({ x: car.position.x, z: car.position.z, ry: car.rotation.y, hour: TOD.hour, t: Date.now() })); } catch (e) {} },
+            take() { try { const o = JSON.parse(sessionStorage.getItem(this.key) || 'null'); sessionStorage.removeItem(this.key); return o && Date.now() - o.t < 180000 && isFinite(o.x) ? o : null; } catch (e) { return null; } }
+        };
+        window.addEventListener('pagehide', () => RESUME.save());
+
+        // ===================== v3 · UYANIŞ =====================
+        // Her binanın durumu 512×1 boyutlu küçük bir dokuda tutulur (R keşif · G seçki · B yükseklik · A bakış ilerlemesi).
+        // Eser gölgelendiricisi bu dokuyu kendi kimliğiyle okur: tek çizim programı, bina başına sıfır ek çizim çağrısı.
+        const AWAKE = {
+            N: 512, data: new Uint8Array(512 * 4), tex: null, uni: null, dirty: false, ev: 0, cur: -1, wisps: null, ripple: null, tether: null,
+            init() {
+                if (this.tex) return;
+                this.tex = new THREE.DataTexture(this.data, this.N, 1, THREE.RGBAFormat);
+                this.tex.magFilter = this.tex.minFilter = THREE.NearestFilter; this.tex.generateMipmaps = false; this.tex.needsUpdate = true;
+                this.uni = {
+                    uState: { value: this.tex }, uAwk: { value: [0, 1, 2, 3].map(() => new THREE.Vector4(-9, -99, 0, 0)) }, uArtFx: { value: GOV.artFx },
+                    uEnvA: LG.u.uEnv, uSunA: { value: LIGHT }, uSunColA: { value: SUN_COL }, uSunUp: { value: 1 }, uNightA: U.night, uTimeA: U.time, uCamA: { value: new THREE.Vector3() }
+                };
+            },
+            set(i, ch, v) { if (i < 0 || i >= this.N) return; const k = i * 4 + ch, b = Math.max(0, Math.min(255, Math.round(v * 255))); if (this.data[k] !== b) { this.data[k] = b; this.dirty = true; } },
+            setHeight(i, h) { this.set(i, 2, h / 160); },
+            flags(e, disc, coll) { if (!e) return; this.set(e.index, 0, disc ? 1 : 0); this.set(e.index, 1, coll ? 1 : 0); },
+            // bakış ilerlemesi: incelerken, turda ya da yanından geçerken bina tabandan yukarı ışıkla dolar
+            focus(e, p) {
+                const i = e ? e.index : -1;
+                if (this.cur !== i && this.cur >= 0) this.set(this.cur, 3, 0);
+                this.cur = i; if (i >= 0) this.set(i, 3, Math.max(0, Math.min(1, p)));
+            },
+            trigger(e) {
+                if (!e || !this.uni) return;
+                const v = this.uni.uAwk.value[this.ev++ % 4]; v.set(e.index, U.time.value, 0, 0);
+                this.spawnWisps(e); this.startRipple(e);
+            },
+            makeFx() {
+                // ruh zerreleri: binadan göğe sarmal çizen, mürekkep paletli ışık tanecikleri (tek çizim çağrısı, havuzlu)
+                const N = SAFE_MODE ? 48 : IS_MOBILE ? 96 : 180, pos = new Float32Array(N * 3), seed = new Float32Array(N * 3), t0 = new Float32Array(N).fill(-99);
+                const g = new THREE.BufferGeometry();
+                g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 3)); g.setAttribute('aT0', new THREE.BufferAttribute(t0, 1));
+                const m = new THREE.ShaderMaterial({
+                    uniforms: { uTime: U.time, uScale: glowScale },
+                    vertexShader: `uniform float uTime; uniform float uScale; attribute vec3 aSeed; attribute float aT0; varying float vA; varying vec3 vC;
+                        vec3 ink(float t){ t = fract(t); vec3 a = vec3(0.98, 0.84, 0.55), b = vec3(0.62, 0.86, 1.0), c = vec3(0.95, 0.62, 0.72), d = vec3(0.70, 0.95, 0.86);
+                            return t < 0.25 ? mix(a, b, t * 4.0) : t < 0.5 ? mix(b, c, (t - 0.25) * 4.0) : t < 0.75 ? mix(c, d, (t - 0.5) * 4.0) : mix(d, a, (t - 0.75) * 4.0); }
+                        void main(){
+                            float life = 3.2 + aSeed.y * 2.2, age = uTime - aT0;
+                            if (age < 0.0 || age > life) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; vA = 0.0; return; }
+                            float u = age / life, R = aSeed.z;
+                            float ang = aSeed.x * 6.2831 + age * (0.7 + aSeed.y * 0.6);
+                            vec3 p = position + vec3(cos(ang) * R * (1.0 - 0.45 * u), age * (5.0 + aSeed.y * 7.0) + sin(age * 2.0 + aSeed.x * 9.0) * 0.6, sin(ang) * R * (1.0 - 0.45 * u));
+                            vec4 mv = modelViewMatrix * vec4(p, 1.0); gl_Position = projectionMatrix * mv;
+                            vA = sin(3.14159 * u) * (0.6 + 0.4 * sin(age * 7.0 + aSeed.x * 30.0)); vC = ink(aSeed.x + u * 0.3);
+                            gl_PointSize = clamp((0.9 + aSeed.y * 1.1) * uScale / -mv.z, 1.0, 48.0);
+                        }`,
+                    fragmentShader: `varying float vA; varying vec3 vC; void main(){ float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.0, d); gl_FragColor = vec4(vC * a * a * vA * 1.5, 1.0); }`,
+                    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
+                });
+                const pts = new THREE.Points(g, m); pts.frustumCulled = false; pts.renderOrder = 10; scene.add(pts);
+                hideInEnv.push(pts); hiddenInMirror.push(pts);
+                this.wisps = { pts, N, next: 0 };
+                // su halkası: uyanan binanın tabanından açılan tek, ince mürekkep halkası
+                const rm = new THREE.ShaderMaterial({
+                    uniforms: { uTime: U.time, uT0: { value: -99 }, uC: { value: new THREE.Vector2() }, uHalf: { value: new THREE.Vector2(5, 5) }, uRot: { value: 0 }, uRound: { value: 1 } },
+                    vertexShader: SEL_RIPPLE_VS,
+                    fragmentShader: `uniform float uTime; uniform float uT0; uniform vec2 uHalf; uniform float uRot; uniform float uRound; varying vec2 vL;
+                        ${GLSL_NOISE}
+                        float sdf(vec2 p){ if (uRound > 0.5) return length(p) - uHalf.x; vec2 q = vec2(cos(uRot) * p.x - sin(uRot) * p.y, sin(uRot) * p.x + cos(uRot) * p.y); vec2 d = abs(q) - uHalf; return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0); }
+                        void main(){
+                            float age = uTime - uT0; if (age < 0.0 || age > 4.0) discard;
+                            float d = sdf(vL); if (d < 0.0) discard;
+                            float r = age * 11.0, w = 0.6 + age * 0.9 + (qn(vL * 0.25 + age) - 0.5) * 1.4;
+                            float ring = exp(-pow((d - r) / w, 2.0)) * (1.0 - age / 4.0);
+                            float inner = exp(-pow((d - r * 0.55) / (w * 0.7), 2.0)) * (1.0 - age / 4.0) * 0.35;
+                            vec3 col = mix(vec3(1.0, 0.85, 0.58), vec3(0.75, 0.9, 1.0), qn(vL * 0.15 + 3.0));
+                            gl_FragColor = vec4(col * (ring + inner) * 0.85, 1.0);
+                        }`,
+                    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
+                });
+                const disc = new THREE.Mesh(new THREE.CircleGeometry(1, 72).rotateX(-Math.PI / 2), rm);
+                disc.renderOrder = 9; disc.frustumCulled = false; disc.visible = false; scene.add(disc);
+                hideInEnv.push(disc); hiddenInMirror.push(disc);
+                this.ripple = disc;
+                // ruh bağı: yanından geçerken bakılan binaya ruhtan uzanan, ilerledikçe parlayan ince ışık zinciri
+                const TN = 26, tp = new Float32Array(TN * 3), ts = new Float32Array(TN), tph = new Float32Array(TN);
+                for (let i = 0; i < TN; i++) { ts[i] = 1.1 + 0.9 * Math.sin(Math.PI * i / (TN - 1)); tph[i] = i / TN; }
+                const tg = new THREE.BufferGeometry(); tg.setAttribute('position', new THREE.BufferAttribute(tp, 3)); tg.setAttribute('aSize', new THREE.BufferAttribute(ts, 1)); tg.setAttribute('aPhase', new THREE.BufferAttribute(tph, 1));
+                const tmat = new THREE.ShaderMaterial({ uniforms: { uColor: { value: new THREE.Color(0xcfe8ff) }, uOpacity: { value: 0 }, uScale: glowScale, uTime: U.time, uBlink: { value: 0 } }, vertexShader: GLOW_VS, fragmentShader: GLOW_FS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+                const tpts = new THREE.Points(tg, tmat); tpts.frustumCulled = false; tpts.renderOrder = 26; tpts.visible = false; scene.add(tpts);
+                hideInEnv.push(tpts); hiddenInMirror.push(tpts);
+                this.tether = { pts: tpts, N: TN, op: 0, target: null, p: 0 };
+            },
+            spawnWisps(e) {
+                if (!this.wisps) return;
+                const W = this.wisps, g = e.mesh.position, R = (e.type === 'sphere' || e.type === 'cylinder') ? e.dims.r : Math.max(e.dims.w, e.dims.d) / 2;
+                const pa = W.pts.geometry.attributes.position, sa = W.pts.geometry.attributes.aSeed, ta = W.pts.geometry.attributes.aT0, n = Math.min(W.N, IS_MOBILE ? 40 : 64), t = U.time.value;
+                for (let k = 0; k < n; k++) {
+                    const i = W.next; W.next = (W.next + 1) % W.N;
+                    pa.setXYZ(i, g.x, WATER_Y + 0.3 + Math.random() * 1.5, g.z);
+                    sa.setXYZ(i, Math.random(), Math.random(), R + 1 + Math.random() * 3);
+                    ta.setX(i, t + Math.random() * 0.9);
+                }
+                pa.needsUpdate = sa.needsUpdate = ta.needsUpdate = true;
+            },
+            startRipple(e) {
+                if (!this.ripple) return;
+                const u = this.ripple.material.uniforms, m = e.mesh, round = e.type === 'sphere' || e.type === 'cylinder';
+                u.uT0.value = U.time.value; u.uC.value.set(m.position.x, m.position.z); u.uRound.value = round ? 1 : 0; u.uRot.value = m.rotation.y;
+                u.uHalf.value.set(round ? e.dims.r : e.dims.w / 2, round ? e.dims.r : e.dims.d / 2);
+                this.ripple.position.set(m.position.x, WATER_Y + 0.45, m.position.z); this.ripple.scale.setScalar(Math.max(u.uHalf.value.x, u.uHalf.value.y) + 48);
+                this.ripple.visible = true;
+            },
+            setTether(e, p, faceY) { if (this.tether) { this.tether.target = e; this.tether.p = p; this.tether.y = faceY; } },
+            update(dt) {
+                if (this.uni) {
+                    this.uni.uArtFx.value += (GOV.artFx - this.uni.uArtFx.value) * Math.min(1, dt * 2);
+                    if (this.dirty) { this.tex.needsUpdate = true; this.dirty = false; }
+                }
+                if (this.ripple && this.ripple.visible && U.time.value - this.ripple.material.uniforms.uT0.value > 4.2) this.ripple.visible = false;
+                const T = this.tether; if (!T || !car) return;
+                const want = T.target && !INTRO.on ? Math.pow(T.p, 0.8) * 0.85 : 0;
+                T.op += (want - T.op) * Math.min(1, dt * 4);
+                T.pts.visible = T.op > 0.01; T.pts.material.uniforms.uOpacity.value = T.op;
+                if (!T.pts.visible || !T.target) return;
+                const m = T.target.mesh, a = T.pts.geometry.attributes.position, sx = car.position.x, sy = car.position.y + 1.5, sz = car.position.z;
+                const ex = m.position.x - sx, ez = m.position.z - sz, L = Math.hypot(ex, ez) || 1, R = (T.target.type === 'sphere' || T.target.type === 'cylinder') ? T.target.dims.r : Math.max(T.target.dims.w, T.target.dims.d) / 2;
+                const tx = m.position.x - ex / L * R * 0.95, tz = m.position.z - ez / L * R * 0.95, ty = Math.min(T.y || 8, sy + 18), flow = (U.time.value * 0.35) % 1;
+                for (let i = 0; i < T.N; i++) {
+                    const u = ((i / T.N) + flow) % 1, arc = Math.sin(Math.PI * u) * Math.min(8, L * 0.18);
+                    a.setXYZ(i, sx + (tx - sx) * u, sy + (ty - sy) * u * u + arc, sz + (tz - sz) * u);
+                }
+                a.needsUpdate = true;
+            }
+        };
+
+        // ===================== v3 · KIYI KÖPÜĞÜ =====================
+        // Her binanın su hattında, taban biçimine (yuvarlak / dikdörtgen) uyan, gidip gelen ince köpük ve ıslak iz.
+        // Tüm şehir için tek bir örneklenmiş (instanced) çizim çağrısı.
+        function createShoreFoam() {
+            if (SAFE_MODE || !BUILDINGS.length) return;
+            const M = 3.6, N = BUILDINGS.length, g = new THREE.PlaneGeometry(1, 1); g.rotateX(-Math.PI / 2);
+            const ig = g;
+            const half = new Float32Array(N * 2), round = new Float32Array(N), ext = new Float32Array(N * 2);
+            BUILDINGS.forEach((e, i) => {
+                const r = e.type === 'sphere' || e.type === 'cylinder', hw = r ? e.dims.r : e.dims.w / 2, hd = r ? e.dims.r : e.dims.d / 2;
+                half[i * 2] = hw; half[i * 2 + 1] = hd; round[i] = r ? 1 : 0; ext[i * 2] = 2 * (hw + M); ext[i * 2 + 1] = 2 * (hd + M);
+            });
+            ig.setAttribute('aHalf', new THREE.InstancedBufferAttribute(half, 2)); ig.setAttribute('aRound', new THREE.InstancedBufferAttribute(round, 1)); ig.setAttribute('aExt', new THREE.InstancedBufferAttribute(ext, 2));
+            const mat = new THREE.ShaderMaterial({
+                uniforms: { uTime: U.time, uFoam: ocean ? ocean.material.uniforms.uFoamCol : { value: new THREE.Color(0.8, 0.82, 0.85) }, uNight: U.night, uM: { value: M } },
+                vertexShader: `attribute vec2 aHalf; attribute float aRound; attribute vec2 aExt; varying vec2 vL; varying vec2 vHalf; varying float vRound; varying vec3 vW; varying float vPh;
+                    void main(){
+                        vec3 p = vec3(position.x * aExt.x, 0.0, position.z * aExt.y);
+                        vec4 w = modelMatrix * instanceMatrix * vec4(p, 1.0);
+                        vL = p.xz; vHalf = aHalf; vRound = aRound; vW = w.xyz; vPh = fract(sin(dot(instanceMatrix[3].xz, vec2(12.9, 78.2))) * 43758.5) * 6.2831;
+                        gl_Position = projectionMatrix * viewMatrix * w;
+                    }`,
+                fragmentShader: `uniform float uTime; uniform vec3 uFoam; uniform float uNight; uniform float uM; varying vec2 vL; varying vec2 vHalf; varying float vRound; varying vec3 vW; varying float vPh;
+                    ${GLSL_NOISE}
+                    void main(){
+                        float d;
+                        if (vRound > 0.5) d = length(vL) - vHalf.x;
+                        else { vec2 q = abs(vL) - vHalf; d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0); }
+                        if (d < -0.05 || d > uM) discard;
+                        float t = uTime;
+                        float n = qn(vW.xz * 0.8 + vec2(t * 0.2, -t * 0.13)) * 0.6 + qn(vW.xz * 2.3 - vec2(t * 0.35, t * 0.22)) * 0.4;
+                        float lap = 0.5 + 0.5 * sin(t * 0.85 + vPh);
+                        float line = smoothstep(0.22, 0.0, abs(d - (0.2 + lap * 1.3)));
+                        float contact = exp(-max(d, 0.0) * 3.2);
+                        float foam = (contact * 0.8 + line * 0.55 * (1.0 - lap * 0.4)) * smoothstep(0.32, 0.72, n + 0.28 * contact);
+                        float trail = exp(-d * 0.8) * smoothstep(0.58, 0.86, n) * 0.3;
+                        float a = clamp(foam + trail, 0.0, 0.8) * (1.0 - smoothstep(uM * 0.55, uM, d));
+                        gl_FragColor = vec4(uFoam * (1.0 + 0.15 * contact), a * (0.85 - 0.35 * uNight));
+                        #include <encodings_fragment>
+                    }`,
+                transparent: true, depthWrite: false
+            });
+            const im = new THREE.InstancedMesh(ig, mat, N);
+            BUILDINGS.forEach((e, i) => { dummy.position.set(e.mesh.position.x, WATER_Y + 0.06, e.mesh.position.z); dummy.rotation.set(0, e.mesh.rotation.y, 0); dummy.scale.set(1, 1, 1); dummy.updateMatrix(); im.setMatrixAt(i, dummy.matrix); });
+            im.instanceMatrix.needsUpdate = true; im.frustumCulled = false; im.renderOrder = 2; scene.add(im);
+            hiddenInMirror.push(im); hideInEnv.push(im);
+        }
 
         // ===================== OKYANUS =====================
         function makeWaterNormals() {
@@ -2387,7 +2767,7 @@ canvas{touch-action:none}
         }
 
         function createOcean() {
-            mirror.scale = IS_MOBILE ? 0.5 : 0.75;
+            mirror.scale = SAFE_MODE ? 0.3 : IS_MOBILE ? [0.35, 0.42, 0.5][Math.min(2, Q.tier)] : (Q.tier >= 3 ? 0.6 : 0.5);
             mirror.rt = new THREE.WebGLRenderTarget(16, 16, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat, encoding: THREE.sRGBEncoding });
             mirror.cam = new THREE.PerspectiveCamera();
             mirror.texMat = new THREE.Matrix4();
@@ -2405,7 +2785,8 @@ canvas{touch-action:none}
                     uScatter: { value: new THREE.Color(0.05, 0.4, 0.35) }, uFoamCol: { value: new THREE.Color(0.8, 0.82, 0.85) },
                     uFogColor: { value: new THREE.Color(0.6, 0.7, 0.85) }, uFogDensity: { value: 0.00022 }
                 },
-                vertexShader: OCEAN_VS, fragmentShader: OCEAN_FS, transparent: true, depthWrite: false
+                vertexShader: OCEAN_VS, fragmentShader: OCEAN_FS, transparent: true, depthWrite: false,
+                defines: { OCEAN_HQ: (!IS_MOBILE || Q.tier >= 2) && !SAFE_MODE ? 1 : 0 }
             });
             ocean = new THREE.Mesh(oceanGeometry(), mat);
             ocean.position.y = WATER_Y; ocean.renderOrder = 1; ocean.frustumCulled = false;
@@ -2470,6 +2851,7 @@ canvas{touch-action:none}
         const _mDir = new THREE.Vector3(), _mUp = new THREE.Vector3(), _mTarget = new THREE.Vector3();
         function renderMirror(cam) {
             cam = cam || camera;
+            mirror.drawn = cam === camera;
             const mc = mirror.cam, cp = cam.position;
             cam.updateMatrixWorld();
             mc.position.set(cp.x, 2 * WATER_Y - cp.y, cp.z);
@@ -2957,7 +3339,7 @@ canvas{touch-action:none}
         }
 
         // ===================== GÜVERCİNLER (orijinal model korunur) =====================
-        const pigeons = [];
+        const pigeons = [], PIGEON_MATS = new Set();
         function createBirds() {
             const loader = new THREE.GLTFLoader();
             loader.load('https://busrasuhaydar.github.io/guvercin/guvercin.glb', gltf => {
@@ -2965,8 +3347,17 @@ canvas{touch-action:none}
                 let skinned = false;
                 proto.traverse(c => {
                     if (c.isSkinnedMesh) skinned = true;
-                    if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; c.frustumCulled = false; if (c.material) c.material.side = THREE.DoubleSide; }
+                    if (c.isMesh) {
+                        c.castShadow = true; c.receiveShadow = true; c.frustumCulled = false;
+                        (Array.isArray(c.material) ? c.material : [c.material]).forEach(m => {
+                            if (!m) return; m.side = THREE.DoubleSide;
+                            // gece görünürlüğü: kendi dokusuyla hafifçe parlar (renkleri değişmez, yalnız aydınlanır)
+                            if (m.emissive) { m.emissive.set(0xffffff); if (m.map && !m.emissiveMap) m.emissiveMap = m.map; else if (!m.map) m.emissive.copy(m.color || m.emissive).multiplyScalar(0.8); m.emissiveIntensity = 0; m.needsUpdate = true; PIGEON_MATS.add(m); }
+                        });
+                    }
                 });
+                nightHooks.push(n => PIGEON_MATS.forEach(m => { m.emissiveIntensity = 0.62 * n; }));
+                if (typeof TOD !== 'undefined' && U.night) PIGEON_MATS.forEach(m => { m.emissiveIntensity = 0.62 * U.night.value; });
                 proto.updateMatrixWorld(true);
                 const box = new THREE.Box3().setFromObject(proto), minY = isFinite(box.min.y) ? box.min.y : 0;
                 const canClone = !skinned || (THREE.SkeletonUtils && THREE.SkeletonUtils.clone);
@@ -3011,11 +3402,14 @@ canvas{touch-action:none}
         }
         const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3();
         // Güvercinler uçmaz ve yer değiştirmez: her biri kendi tüneğinde durur ve yalnız modelin kendi animasyonunu oynatır.
+        let _pgT = 0;
         function updatePigeons(dt, t) {
+            // konumlar sabit: yalnız 4 karede bir mesafe kontrolü (uzaktakiler çizilmez → GPU rahatlar)
+            if (++_pgT % 4) return;
+            const cp = camera.position, far = (cameraMode === 2 ? 900 : 520) ** 2;
             pigeons.forEach(b => {
-                if (b.state === 'fly' && b.to) { b.slot = b.slot || { perch: { pts: [b.to] }, t: 0 }; }
-                b.state = 'perch'; b.walk = 0;
-                perchPos(b.slot, _a); b.obj.position.set(_a.x, _a.y + b.foot, _a.z); b.obj.rotation.y = b.yaw0;
+                if (!b.placed) { perchPos(b.slot, _a); b.obj.position.set(_a.x, _a.y + b.foot, _a.z); b.obj.rotation.y = b.yaw0; b.placed = true; }
+                b.obj.visible = b.obj.position.distanceToSquared(cp) < far;
             });
         }
 
@@ -3036,24 +3430,41 @@ canvas{touch-action:none}
             cameraDistance = 12; cameraPitch = 0.0;
             INTRO.from.set(-dx * 820 + dz * 260, 560, -dz * 820 - dx * 260); INTRO.fromLook.set(dx * 120, 0, dz * 120);
             camera.position.copy(INTRO.from); camera.lookAt(INTRO.fromLook);
+            const rs = RESUME.take();
+            if (rs) { car.position.set(rs.x, DECK + 0.45, rs.z); car.rotation.y = rs.ry; if (isFinite(rs.hour)) TOD.hour = rs.hour; INTRO.on = false; camera.position.set(rs.x, DECK + 8, rs.z + 14); }
             spirit = { group: new THREE.Group(), model: null, mixer: null, trail: [], opacity: 1 };
             car.add(spirit.group);
             const shellMat = new THREE.ShaderMaterial({ uniforms: { uTime: U.time, uOpacity: { value: 0.9 } }, vertexShader: WISP_VS, fragmentShader: WISP_FS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
-            const shell = new THREE.Mesh(new THREE.SphereGeometry(0.62, 32, 18), shellMat); shell.scale.set(1, 1.35, 1);
+            const shell = new THREE.Mesh(new THREE.SphereGeometry(0.85, 40, 24), shellMat); shell.scale.set(1, 1.35, 1);
             const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
             const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.25, 'rgba(200,232,255,0.55)'); gr.addColorStop(1, 'rgba(160,210,255,0)');
             g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
             const core = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
-            core.scale.set(1.6, 1.6, 1);
-            spirit.shell = shell; spirit.core = core;
-            spirit.group.add(shell, core);
+            core.scale.set(2.6, 2.6, 1);
+            // daha belirgin: geniş, nefes alan bir ışık halesi ve yolda ruhun altında yumuşak bir ışık havuzu
+            const aura = new THREE.Sprite(new THREE.SpriteMaterial({ map: core.material.map, color: 0x9fd4ff, transparent: true, opacity: 0.45, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
+            aura.scale.set(7, 7, 1);
+            // yerde net bir konum halkası ve gidiş yönünü gösteren ok: kalabalıkta, uzaktan ve kuş bakışında ruhu takip etmek kolaylaşır
+            const pc = document.createElement('canvas'); pc.width = pc.height = 256; const pg = pc.getContext('2d');
+            const pgr = pg.createRadialGradient(128, 128, 0, 128, 128, 120); pgr.addColorStop(0, 'rgba(190,228,255,0.55)'); pgr.addColorStop(0.45, 'rgba(160,210,255,0.18)'); pgr.addColorStop(1, 'rgba(160,210,255,0)');
+            pg.fillStyle = pgr; pg.fillRect(0, 0, 256, 256);
+            pg.strokeStyle = 'rgba(235,248,255,0.95)'; pg.lineWidth = 7; pg.beginPath(); pg.arc(128, 128, 74, 0, Math.PI * 2); pg.stroke();
+            pg.strokeStyle = 'rgba(170,220,255,0.5)'; pg.lineWidth = 3; pg.beginPath(); pg.arc(128, 128, 90, 0, Math.PI * 2); pg.stroke();
+            pg.fillStyle = 'rgba(255,255,255,0.98)'; pg.beginPath(); pg.moveTo(128, 8); pg.lineTo(150, 44); pg.lineTo(128, 36); pg.lineTo(106, 44); pg.closePath(); pg.fill();
+            const poolMap = new THREE.CanvasTexture(pc); poolMap.encoding = THREE.sRGBEncoding; poolMap.anisotropy = 8;
+            const pool = new THREE.Mesh(new THREE.PlaneGeometry(7, 7).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: poolMap, color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -10, polygonOffsetUnits: -20 }));
+            pool.renderOrder = 9; car.add(pool); pool.position.y = -0.1;
+            spirit.shell = shell; spirit.core = core; spirit.aura = aura; spirit.pool = pool;
+            // cam yollar şeffaf ve renderOrder 6 ile çizilir; ruh ondan SONRA çizilmezse camın altında kalmış gibi görünür
+            shell.renderOrder = 30; core.renderOrder = 31; aura.renderOrder = 29; pool.renderOrder = 28;
+            spirit.group.add(shell, core, aura);
             const N = 36, pos = new Float32Array(N * 3), sz = new Float32Array(N), ph = new Float32Array(N);
             for (let i = 0; i < N; i++) { sz[i] = 2.6 * (1 - i / N) + 0.4; ph[i] = i / N; }
             const tg = new THREE.BufferGeometry();
             tg.setAttribute('position', new THREE.BufferAttribute(pos, 3)); tg.setAttribute('aSize', new THREE.BufferAttribute(sz, 1)); tg.setAttribute('aPhase', new THREE.BufferAttribute(ph, 1));
             const tm = new THREE.ShaderMaterial({ uniforms: { uColor: { value: new THREE.Color(0xbfe4ff) }, uOpacity: { value: 0.55 }, uScale: glowScale, uTime: U.time, uBlink: { value: 0 } }, vertexShader: GLOW_VS, fragmentShader: GLOW_FS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
-            spirit.trailPts = new THREE.Points(tg, tm); spirit.trailPts.frustumCulled = false; spirit.trailPts.renderOrder = 4;
-            scene.add(spirit.trailPts);
+            spirit.trailPts = new THREE.Points(tg, tm); spirit.trailPts.frustumCulled = false; spirit.trailPts.renderOrder = 27;
+            scene.add(spirit.trailPts); spirit.trailPts.visible = false; // uzayan ışık izi kapalı: ruh tek, net bir figür
             spirit.group.updateMatrixWorld(true);
             const w0 = new THREE.Vector3().setFromMatrixPosition(spirit.group.matrixWorld);
             for (let i = 0; i < N; i++) { pos[i * 3] = w0.x; pos[i * 3 + 1] = w0.y; pos[i * 3 + 2] = w0.z; }
@@ -3064,11 +3475,15 @@ canvas{touch-action:none}
         function updateSpirit(dt, t) {
             if (!spirit) return;
             const g = spirit.group;
-            g.position.y = 1.35 + Math.sin(t * 1.6) * 0.16;
+            g.position.y = 1.5 + Math.sin(t * 1.6) * 0.18;
             g.rotation.y = Math.sin(t * 0.7) * 0.15;
             const firstPerson = cameraMode === 1 && !(window.SU && SU.ready && SU.isOverriding && SU.isOverriding());
-            g.visible = !firstPerson;
-            spirit.trailPts.visible = !firstPerson;
+            g.visible = !firstPerson; if (spirit.pool) spirit.pool.visible = !firstPerson && MOVE.onDeck !== false;
+            // uzaktan / kuş bakışında da kaybolmasın: ekrandaki boyutu en az belli bir değerde tutulur
+            const cd = camera ? camera.position.distanceTo(car.position) : 10, sc = Math.max(1, cd / 38);
+            g.scale.setScalar(sc); if (spirit.pool) spirit.pool.scale.setScalar(Math.max(1, sc * 0.8));
+            if (spirit.aura) spirit.aura.material.opacity = 0.3 + 0.06 * Math.sin(t * 1.4);
+            spirit.trailPts.visible = false;
             if (spirit.mixer) spirit.mixer.update(dt);
             g.updateMatrixWorld(true);
             _sw.setFromMatrixPosition(g.matrixWorld);
@@ -3247,6 +3662,7 @@ canvas{touch-action:none}
             deselectBuilding(true);
             selectedBuilding = building;
             const e = building.userData.entry || {}, round = e.type === 'sphere' || e.type === 'cylinder';
+            LOD.hi(e);
             const hw = round ? (e.dims.r || 5) + (e.type === 'cylinder' ? 0.05 : 0) : e.dims.w / 2, hd = round ? hw : e.dims.d / 2;
             const t0 = U.time.value, top = BASE_Y + (e.type === 'sphere' ? 2 * e.dims.r : e.dims.h) + (e.topExtra || 0);
             const R = Math.max(hw, hd);
@@ -3353,9 +3769,10 @@ canvas{touch-action:none}
                 if (dist > ROAM_RADIUS) { car.position.x *= ROAM_RADIUS / dist; car.position.z *= ROAM_RADIUS / dist; }
             }
             const onDeck = roadNear(car.position.x, car.position.z, ROAD_HALF + 1.5, () => true) || Math.hypot(car.position.x, car.position.z) < PLAZA_R + 1 || pathNodes.some(n => (n.x - car.position.x) ** 2 + (n.z - car.position.z) ** 2 < n.r * n.r);
-            const goalY = onDeck ? DECK + 0.45 : WATER_Y + 0.9;
-            car.position.y += (goalY - car.position.y) * Math.min(1, dt * 4);
-            if (onDeck && car.position.y > DECK) PAINT.stroke(car.position.x, car.position.z);
+            // ruh her yerde yol yüzeyinin biraz üstünde süzülür: yolların altına asla girmez
+            car.position.y += (DECK + 0.6 - car.position.y) * Math.min(1, dt * 6);
+            MOVE.onDeck = onDeck;
+            if (onDeck) PAINT.stroke(car.position.x, car.position.z); else PAINT.last = null;
         }
 
         // ===================== KAMERA: takip · ruhun gözü · kuş bakışı · keşif açısı =====================
@@ -3558,22 +3975,68 @@ canvas{touch-action:none}
             skyMesh.position.copy(skyPos);
         }
 
+        // ===================== MİNİ HARİTA GÖRÜNTÜSÜ: şehrin gerçek, tepeden çekilmiş fotoğrafı =====================
+        // Dar açılı, çok yüksekten dikey bakan kamera (neredeyse ortografik) şehri bir kez render eder; piksel okunur ve tuvale yazılır.
+        // Yalnız eserler yüklendikçe ve günün saati belirgin değiştiğinde yenilenir → her karede maliyet sıfır.
+        function miniSnapshot(N, ext) {
+            if (!renderer || !scene) return null;
+            const half = THREE.MathUtils.degToRad(9), h = ext / Math.tan(half);
+            const cam = new THREE.PerspectiveCamera(18, 1, h - 900, h + 1400);
+            cam.position.set(0, h, 0); cam.up.set(0, 0, -1); cam.lookAt(0, 0, 0); cam.updateProjectionMatrix(); cam.updateMatrixWorld();
+            const rt = new THREE.WebGLRenderTarget(N, N, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat, type: THREE.UnsignedByteType, encoding: THREE.sRGBEncoding });
+            let extra = []; try { extra = [outlineMesh, markerPts, ROUTE.mesh, SEL && SEL.shell]; } catch (e) {}
+            const hide = [car, spirit && spirit.trailPts].concat(extra, MINI_HIDE).filter(o => o && o.visible);
+            const fogD = scene.fog ? scene.fog.density : 0, ou = ocean && ocean.material.uniforms, oFog = ou && ou.uFogDensity ? ou.uFogDensity.value : 0;
+            const skyP = skyMesh.position.clone(), ocP = ocean ? ocean.position.clone() : null, cutWas = CUT.on.value, cc = new THREE.Color(), ca = renderer.getClearAlpha();
+            renderer.getClearColor(cc);
+            const buf = new Uint8Array(N * N * 4);
+            try {
+                hide.forEach(o => o.visible = false);
+                if (scene.fog) scene.fog.density = 0; if (ou && ou.uFogDensity) ou.uFogDensity.value = 0; CUT.on.value = 0;
+                skyMesh.position.copy(cam.position); if (ocean) ocean.position.set(0, WATER_Y, 0);
+                renderMirror(cam);
+                LG.render(cam);
+                renderer.setRenderTarget(rt); renderer.setClearColor(0x0b2a3a, 1); renderer.clear();
+                renderer.render(scene, cam);
+                renderer.readRenderTargetPixels(rt, 0, 0, N, N, buf);
+            } catch (e) { console.warn('Mini harita görüntüsü alınamadı', e); return null; }
+            finally {
+                renderer.setRenderTarget(null); renderer.setClearColor(cc, ca); rt.dispose(); LG.off();
+                hide.forEach(o => o.visible = true);
+                if (scene.fog) scene.fog.density = fogD; if (ou && ou.uFogDensity) ou.uFogDensity.value = oFog; CUT.on.value = cutWas;
+                skyMesh.position.copy(skyP); if (ocP) ocean.position.copy(ocP);
+            }
+            const c = document.createElement('canvas'); c.width = c.height = N; const g = c.getContext('2d'), im = g.createImageData(N, N), row = N * 4;
+            for (let y = 0; y < N; y++) im.data.set(buf.subarray((N - 1 - y) * row, (N - y) * row), y * row);
+            g.putImageData(im, 0, 0);
+            // kenarlara yumuşak vinyet: harita ada gibi okunur
+            const vg = g.createRadialGradient(N / 2, N / 2, N * 0.36, N / 2, N / 2, N * 0.5); vg.addColorStop(0, 'rgba(6,18,30,0)'); vg.addColorStop(1, 'rgba(6,18,30,0.55)');
+            g.fillStyle = vg; g.fillRect(0, 0, N, N);
+            return c;
+        }
+        const MINI_HIDE = [];
+
         // ===================== ANİMASYON =====================
         let clock = new THREE.Clock();
         let frameCount = 0;
 
         function animate() {
             requestAnimationFrame(animate);
-            const deltaTime = Math.min(clock.getDelta(), 0.1), t = clock.elapsedTime;
+            BUDGET.start();
+            const rawDt = clock.getDelta(), deltaTime = Math.min(rawDt, 0.1), t = clock.elapsedTime;
             U.time.value = t;
+            GOV.sample(rawDt);
 
-            if (frameCount % 3 === 0) birdMixers.forEach(mixer => mixer.update(deltaTime * 3));
+            if (frameCount % 3 === 0) { const cp = camera.position; birdMixers.forEach(mixer => { const r = mixer.getRoot(); if (r && r.parent === scene && (!r.visible || r.position.distanceToSquared(cp) > 170 * 170)) return; mixer.update(deltaTime * 3); }); }
 
             const overridden = window.SU && SU.ready && SU.update(deltaTime, t);
             if (!overridden) { updateCar(deltaTime); updateCamera(deltaTime); }
             updateSphereBuildings();
             updateOutline(deltaTime);
-            PAINT.update(deltaTime, MOVE.speed);
+            PAINT.update(deltaTime);
+            if (BUDGET.ok(3)) ART.updateNear(deltaTime);
+            LOD.update(deltaTime);
+            AWAKE.update(deltaTime);
             updateFocus(deltaTime);
             ROUTE.update(deltaTime, car.position.x, car.position.z);
             updateTOD(deltaTime);
@@ -3585,12 +4048,16 @@ canvas{touch-action:none}
             glowScale.value = renderer.domElement.height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
             if (fountainPts) fountainPts.material.uniforms.uScale.value = glowScale.value;
 
-            if (FEATURES.shadows && frameCount % (IS_MOBILE ? 8 : 2) === 0) renderer.shadowMap.needsUpdate = true;
+            if (FEATURES.shadows && frameCount % GOV.shadowEvery === 0) renderer.shadowMap.needsUpdate = true;
             LG.off();
             if (ATLAS.on) { renderAtlas(); if (window.SU && SU.ready) SU.frame(deltaTime); frameCount++; return; }
+            // derinlik hassasiyeti: kamera yükseldikçe yakın düzlem uzar → kuş bakışında z-çakışması / siyah titreme olmaz
+            { const nn = Math.min(14, Math.max(0.6, (camera.position.y - WATER_Y) * 0.035)); if (Math.abs(nn - camera.near) > 0.08 * camera.near) { camera.near = nn; camera.updateProjectionMatrix(); } }
             LIVE_ENV.update(camera);
             SPH_ENV.update();
-            renderMirror();
+            // ayna geçişi tüm sahneyi yeniden çizer: zayıf cihazlarda 2-3 karede bir (yansıma dokusu ile matrisi birlikte güncellenir,
+            // dünya ile hizalı kalır; yalnız hızlı dönüşte kenarda çok kısa bir gecikme olur)
+            if (frameCount % GOV.mirrorEvery === 0 || !mirror.drawn) { renderMirror(); mirror.drawn = true; }
             renderRefraction(camera);
             if (refr.on) underwaterOnly.forEach(o => o.visible = false);
             LG.render(camera);
@@ -3606,7 +4073,7 @@ canvas{touch-action:none}
                 camera.aspect = window.innerWidth / window.innerHeight;
                 camera.updateProjectionMatrix();
                 renderer.setSize(window.innerWidth, window.innerHeight);
-                renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PR));
+                renderer.setPixelRatio(Math.min(renderer.getPixelRatio(), GOV.prMax || MAX_PR));
                 resizeWaterTargets();
             }
         }
@@ -3656,6 +4123,21 @@ canvas{touch-action:none}
         #su-top { position: absolute; top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); display: flex; gap: 6px; padding: 6px; pointer-events: auto; }
         .su-badge { position: absolute; top: -6px; right: -6px; min-width: 22px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--gold); color: #1d1606; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
         .su-rel { position: relative; }
+        #su-awake { position: absolute; left: 50%; top: calc(74px + env(safe-area-inset-top)); transform: translate(-50%, -10px); opacity: 0; pointer-events: none; padding: 14px 20px 13px; min-width: min(360px, 88vw); max-width: min(92vw, 520px); text-align: center; z-index: 11; transition: opacity .7s ease, transform .9s cubic-bezier(.2,.8,.2,1); --glass: rgba(10, 16, 28, 0.5); }
+        #su-awake.show { opacity: 1; transform: translate(-50%, 0); }
+        #su-awake .aw-name { font-size: 20px; font-weight: 300; letter-spacing: .06em; margin: 4px 0 2px; }
+        #su-awake .aw-q { font-style: italic; color: #f1e4c3; font-size: 14px; }
+        #su-awake .aw-q b { font-style: normal; color: var(--gold); font-weight: 600; }
+        #su-awake .aw-row { display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 8px; color: var(--mute); font-size: 12px; }
+        .su-sw { display: inline-flex; gap: 3px; vertical-align: middle; }
+        .su-sw i { display: inline-block; border-radius: 50%; box-shadow: 0 0 0 1px rgba(255,255,255,.25); }
+        .su-cq { margin: 4px 0 14px; padding: 12px 14px; border-radius: 14px; border: 1px solid rgba(233, 196, 106, 0.28); background: linear-gradient(135deg, rgba(233,196,106,.08), rgba(120,170,255,.05)); }
+        .su-cq p { margin: 4px 0 8px; font-style: italic; font-size: 15px; color: #f1e4c3; }
+        .su-cq p b { font-style: normal; color: var(--gold); }
+        .su-cq small { display: block; margin-top: 8px; color: var(--mute); font-size: 11.5px; }
+        .su-tq { font-style: italic; color: #f1e4c3; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        @media (max-width: 600px) { #su-awake { top: calc(112px + env(safe-area-inset-top)); padding: 11px 14px; } #su-awake .aw-name { font-size: 17px; } }
+        @media (prefers-reduced-motion: reduce) { #su-awake { transition: opacity .3s; transform: translate(-50%, 0); } }
         #su-toast { position: absolute; left: 50%; bottom: calc(118px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(20px); opacity: 0; transition: 0.25s; padding: 12px 16px; display: flex; gap: 12px; align-items: center; max-width: min(92vw, 520px); pointer-events: none; }
         #su-toast.show { opacity: 1; transform: translateX(-50%); pointer-events: auto; }
         /* --- tur --- */
@@ -3807,15 +4289,17 @@ canvas{touch-action:none}
         #su-joy.show { display: block; }
         #su-joy i { position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; margin: -26px 0 0 -26px; border-radius: 50%; background: rgba(255, 255, 255, 0.85); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4); }
         @media (max-width: 860px), (orientation: portrait) and (max-width: 1100px) {
-            #su-insp { left: 0; right: 0; top: auto; width: auto; height: 60vh; transform: translateY(104%); border-width: 1px 0 0 0; border-radius: 22px 22px 0 0; padding-top: 10px; }
+            #su-insp { left: 0; right: 0; top: auto; width: auto; height: min(44vh, 440px); transform: translateY(104%); border-width: 1px 0 0 0; border-radius: 22px 22px 0 0; padding-top: 10px; }
             #su-insp.open { transform: none; }
             #su-insp.min { transform: translateY(104%); }
             #su-insp::before { content: ""; display: block; width: 44px; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.3); margin: 0 auto 12px; }
             #su-ibar { max-width: calc(100vw - 28px); }
+            #su-ui.inspecting #su-status, #su-ui.inspecting #su-mini, #su-ui.inspecting #su-joy { display: none !important; }
+            #su-ui.inspecting #su-ibar { top: calc(60px + env(safe-area-inset-top)); }
+            .su-art img { max-height: 30vh; }
             .su-atlas { flex-direction: column; }
             #su-aside { width: auto; border-left: 0; border-top: 1px solid var(--line); max-height: 45%; }
             .su-title { font-size: 22px; }
-            .su-art img { max-height: 46vh; }
         }
         @media (max-width: 600px) {
             #su-top { left: max(8px, env(safe-area-inset-left)); right: max(8px, env(safe-area-inset-right)); justify-content: space-between; gap: 2px; padding: 4px; top: max(8px, env(safe-area-inset-top)); }
@@ -3847,8 +4331,8 @@ canvas{touch-action:none}
         const TYPE_TR = { tall: 'Gökdelen', box: 'Konut', sphere: 'Küre Ev', cylinder: 'Altıgen Kule' };
         const DISTRICT_TR = {}; DISTRICTS.forEach(d => { DISTRICT_TR[d.key] = d.name; });
         const GLAZE_TR = { pearl: 'Berrak', sand: 'Amber', teal: 'Deniz camı', graphite: 'Füme' };
-        const STATE_TR = { undiscovered: 'Keşfedilmedi', exploring: 'Keşfediliyor', discovered: 'Keşfedildi', collected: 'Koleksiyonunda' };
-        const HOW_TR = { inspect: 'İncelendi', tour: 'Turda izlendi', art: 'Eseri incelendi', walk: 'Yanından geçerken izlendi' };
+        const STATE_TR = { undiscovered: 'Uykuda', exploring: 'Uyanıyor', discovered: 'Uyandı', collected: 'Seçkinde' };
+        const HOW_TR = { inspect: 'Bakışınla uyandı', tour: 'Turda uyandı', art: 'Eserine bakınca uyandı', walk: 'Yanından geçerken uyandı' };
         const DWELL = 3, WALK_NEED = 3;
         const CAM_NAMES = ['Ruhu takip', 'Ruhun gözünden', 'Kuş bakışı · hızlı', 'Keşif açısı · binaları kadrajlar'];
         const ROOF = {
@@ -3918,6 +4402,29 @@ canvas{touch-action:none}
         }
         function name(e) { return `${TYPE_TR[e.type] || 'Bina'} ${e.id}`; }
         function artFile(e) { return (e.mesh.userData.textureURL || '').split('/').pop(); }
+        // v3 · RENGİN SORUSU: eserin baskın renginden doğan, binaya özgü kısa bir soru. Bu, eserin adı değildir;
+        // şehrin o renkten duyduğu sorudur. Palet eserin küçültülmüş kopyasından yaklaşık hesaplanır, esere uygulanmaz.
+        const COLOR_Q = [
+            [0, 15, 'Kırmızı', ['Hangi ateşi suya taşıdın?', 'Bir yara mı, bir başlangıç mı?']],
+            [15, 42, 'Turuncu', ['Akşamın hangi anını sakladın?', 'Sıcaklık nerede biter, sen nerede başlarsın?']],
+            [42, 68, 'Sarı', ['Işık nereden sızıyor?', 'Unuttuğun bir sabah var mı?']],
+            [68, 160, 'Yeşil', ['Neyi büyütmeye cesaret ettin?', 'Sessizce kök salan ne?']],
+            [160, 200, 'Turkuaz', ['Hangi derinlikte nefes alırsın?', 'Su seni nereye taşıyor?']],
+            [200, 252, 'Mavi', ['Sessizliğin dibinde kim bekliyor?', 'Uzaklık bir renk olsaydı, bu mu olurdu?']],
+            [252, 300, 'Mor', ['Rüyanın hangi kapısı aralık?', 'Gece sana ne fısıldadı?']],
+            [300, 345, 'Gül', ['Kırılgan olan neden bu kadar güçlü?', 'Hangi şefkati sakladın?']],
+            [345, 361, 'Kırmızı', ['Hangi ateşi suya taşıdın?', 'Bir yara mı, bir başlangıç mı?']]
+        ];
+        function artMat(e) { return Array.isArray(e.mesh.material) ? e.mesh.material[0] : e.mesh.material; }
+        function palette(e) { const m = artMat(e); return (m && m.userData && m.userData.palette) || null; }
+        function colorQuestion(e) {
+            const p = palette(e); if (!p) return null;
+            const v = seededHash(e.id) & 1;
+            if (p.hue < 0 || p.sat < 0.12) return p.light > 0.55 ? { word: 'İnci', q: ['Hayaletler hangi renkte konuşur?', 'Boşluk da bir hikâye mi?'][v] } : { word: 'Gece', q: ['Karanlıkta hangi renk uyanık kalır?', 'Görmediğin şey seni görüyor mu?'][v] };
+            const row = COLOR_Q.find(r => p.hue >= r[0] && p.hue < r[1]) || COLOR_Q[0];
+            return { word: row[2], q: row[3][v] };
+        }
+        function swatches(e, size) { const p = palette(e); if (!p || !p.colors.length) return ''; return `<span class="su-sw" aria-hidden="true">${p.colors.map(c => `<i style="background:${c};width:${size || 14}px;height:${size || 14}px"></i>`).join('')}</span>`; }
         function dimsText(e) {
             const d = e.dims;
             if (e.type === 'sphere') return `Çap ${(2 * d.r).toFixed(1)} birim`;
@@ -3939,12 +4446,14 @@ canvas{touch-action:none}
                     { trait_type: 'Yükseklik', value: +(g.top - g.base).toFixed(1) },
                     { trait_type: 'Konum X', value: +g.cx.toFixed(1) },
                     { trait_type: 'Konum Z', value: +g.cz.toFixed(1) }
-                ],
+                ].concat(colorQuestion(e) ? [{ trait_type: 'Baskın renk', value: colorQuestion(e).word }] : []),
                 properties: {
                     building_id: e.id, type: e.type, district: e.district, roof: e.roof, glaze: e.glaze, materials: roof[1],
                     artwork_file: artFile(e), artwork_url: e.mesh.userData.textureURL,
                     artwork_resolution: a && a.w ? `${a.w}x${a.h}` : null,
-                    dimensions: e.dims
+                    dimensions: e.dims,
+                    palette_approx: palette(e) ? { colors: palette(e).colors, note: 'Eserin küçültülmüş kopyasından yaklaşık hesaplandı; esere uygulanmaz.' } : null,
+                    color_question: colorQuestion(e) ? `${colorQuestion(e).word}: ${colorQuestion(e).q}` : null
                 },
                 mint: { status: 'not_minted', verified_on_chain: false, integration: 'SU.mintIntegrationPoint(metadata) — henüz bağlı değil' }
             };
@@ -3966,6 +4475,17 @@ canvas{touch-action:none}
         function loadDiscovery() {
             try { const o = JSON.parse(localStorage.getItem(DS_KEY) || '{}'); discovered = new Set((o.ids || []).filter(id => byId.has(id))); discHistory = (o.history || []).filter(h => byId.has(h.id)).slice(-80); }
             catch (e) { discovered = new Set(); discHistory = []; }
+            syncAwake();
+        }
+        function syncAwake() { BUILDINGS.forEach(e => AWAKE.flags(e, discovered.has(e.id), collection.includes(e.id))); }
+        // uyanış kartı: kısa, zarif, dokunmayı beklemeyen bir an
+        let awakeTimer = null;
+        function showAwake(e) {
+            const c = $('#su-awake'); if (!c) return;
+            const cq = colorQuestion(e);
+            c.innerHTML = `<div class="su-kicker">Bir ruh uyandı · ${discovered.size} / ${BUILDINGS.length}</div><div class="aw-name">${esc(name(e))}</div>${cq ? `<div class="aw-q"><b>${esc(cq.word)}</b> soruyor: ${esc(cq.q)}</div>` : ''}<div class="aw-row">${swatches(e, 12)}<span>${esc(DISTRICT_TR[e.district])}</span></div>`;
+            c.classList.remove('show'); void c.offsetWidth; c.classList.add('show');
+            clearTimeout(awakeTimer); awakeTimer = setTimeout(() => c.classList.remove('show'), 4800);
         }
         function saveDiscovery() { try { localStorage.setItem(DS_KEY, JSON.stringify({ ids: [...discovered], history: discHistory })); } catch (e) {} }
         function isDiscovered(e) { return discovered.has(e.id); }
@@ -3978,7 +4498,8 @@ canvas{touch-action:none}
             if (!e || discovered.has(e.id)) return;
             discovered.add(e.id); discHistory.push({ id: e.id, t: Date.now(), how }); if (discHistory.length > 80) discHistory.shift();
             saveDiscovery();
-            toast(`${name(e)} keşfedildi · ${discovered.size} / ${BUILDINGS.length}`);
+            AWAKE.flags(e, true, inColl(e)); AWAKE.trigger(e); if (AWAKE.cur === e.index) AWAKE.focus(null, 0);
+            showAwake(e);
             refreshStatus(true);
             if (insp.e === e) renderInspActions();
             if ($('#su-map').classList.contains('show')) { drawMap(); renderAside(); }
@@ -3987,13 +4508,13 @@ canvas{touch-action:none}
             if (insp.e) return { district: DISTRICT_TR[insp.e.district], what: `${name(insp.e)} — inceleniyor` };
             if (tour.active && tour.list[tour.idx]) { const e = tour.list[tour.idx]; return { district: DISTRICT_TR[e.district], what: `${name(e)} — sinematik turda` }; }
             const d = car ? districtOf(car.position.x, car.position.z) : DISTRICTS[0];
-            return { district: d.name, what: ROUTE.active ? 'Rehberli keşif · ışıklı boyayı takip et' : (WALK.target ? `${name(WALK.target)} — keşfediliyor` : 'Serbest gezinti · bir binaya dokun ve incele') };
+            return { district: d.name, what: ROUTE.active ? 'Rehberli keşif · ışıklı izi takip et' : (WALK.target ? `${name(WALK.target)} — uyanıyor` : 'Serbest gezinti · bir binaya dokun, rengini dinle') };
         }
         let statusT = 0;
         function refreshStatus(force) {
             const st = $('#su-status'); if (!st) return;
             const N = BUILDINGS.length, d = discovered.size, pct = d / N * 100, c = currentContext();
-            $('#su-st-n').textContent = d; $('#su-st-t').textContent = `/ ${N} keşfedildi`; $('#su-st-p').textContent = `%${pct.toFixed(1)}`;
+            $('#su-st-n').textContent = d; $('#su-st-t').textContent = `/ ${N} uyandı`; $('#su-st-p').textContent = `%${pct.toFixed(1)}`;
             $('#su-st-bar').style.width = pct.toFixed(2) + '%';
             $('#su-st-ctx').textContent = `${c.district} · ${c.what}`;
         }
@@ -4038,12 +4559,23 @@ canvas{touch-action:none}
             const done = !best || discovered.has(show.id);
             setRing(seek, (WALK.prog.get(show.id) || 0) / WALK_NEED, done);
             seek.querySelector('b').textContent = name(show);
-            seek.querySelector('i').textContent = done ? 'Keşfedildi' : 'Keşfediliyor · kadrajda tut';
+            seek.querySelector('i').textContent = done ? 'Uyandı' : 'Uyanıyor · bakışını ayırma';
             seek.classList.add('show'); seek.classList.toggle('done', done);
         }
 
         // ---------------------- MİNİ HARİTA: her an nerede olduğun, nereye baktığın, rota ve keşif durumu ----------------------
-        const MINI = { base: null, ext: 620, t: 0, range: 230 };
+        const MINI = { base: null, ext: 620, t: 0, range: 230, photo: false, artAt: -1, hour: -99, snapT: 0 };
+        function refreshMiniPhoto(dt) {
+            // gerçek görüntü: ilk açılışta, eserler yüklendikçe (her ~%15'te bir) ve saat ≥0.5 değişince yeniden çekilir
+            MINI.snapT += dt; if (MINI.snapT < 1.5 || ATLAS.on) return;
+            const tot = ART.total || 1, prog = Math.floor(10 * ART.loaded / tot), hr = TOD.hour;
+            const hd = Math.abs(((hr - MINI.hour + 36) % 24) - 12);
+            if (MINI.photo && prog === MINI.artAt && (12 - hd) < 0.5) return;
+            if (MINI.photo && prog !== MINI.artAt && prog < 10 && prog - MINI.artAt < 2 && MINI.snapT < 6) return;
+            MINI.snapT = 0;
+            const c = miniSnapshot(IS_MOBILE || LOW_MEM ? 768 : 1280, MINI.ext);
+            if (c) { MINI.base = c; MINI.photo = true; MINI.artAt = prog; MINI.hour = hr; }
+        }
         function buildMiniBase() {
             const N = 1024, c = document.createElement('canvas'); c.width = c.height = N; const g = c.getContext('2d'), k = N / (2 * MINI.ext);
             g.setTransform(k, 0, 0, k, N / 2, N / 2);
@@ -4058,6 +4590,7 @@ canvas{touch-action:none}
             const el = $('#su-mini'); if (!el || !car || ui.classList.contains('hidden')) return;
             const vis = !insp.e && !tour.active && !$('#su-map').classList.contains('show');
             el.style.display = vis ? '' : 'none'; if (!vis) return;
+            refreshMiniPhoto(dt);
             MINI.t += dt; if (MINI.t < 1 / 20) return; MINI.t = 0;
             if (!MINI.base) buildMiniBase();
             const cv = el.querySelector('canvas'), g = cv.getContext('2d'), W = cv.width, R = MINI.range * (cameraMode === 2 ? 2.2 : MOVE.fastMode ? 1.5 : 1), k = W / (2 * R);
@@ -4070,7 +4603,8 @@ canvas{touch-action:none}
             if (ROUTE.active && ROUTE.pts.length) { g.strokeStyle = '#ffd68c'; g.lineWidth = 5 / k; g.setLineDash([10 / k, 7 / k]); g.beginPath(); for (let i = ROUTE.idx, n = 0; i < ROUTE.pts.length && n < 260; i += 2, n++) { const p = ROUTE.pts[i]; n ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]); } g.stroke(); g.setLineDash([]); }
             BUILDINGS.forEach(e => {
                 const m = e.mesh, dx = m.position.x - car.position.x, dz = m.position.z - car.position.z; if (dx * dx + dz * dz > R * R * 1.6) return;
-                const st = stateOf(e); g.fillStyle = STATE_COL[st]; g.beginPath(); g.arc(m.position.x, m.position.z, Math.max(3.2 / k, Math.min(e.dims.r || Math.max(e.dims.w || 0, e.dims.d || 0) / 2, 9)), 0, Math.PI * 2); g.fill();
+                const st = stateOf(e); g.beginPath(); g.arc(m.position.x, m.position.z, Math.max(3.2 / k, Math.min(e.dims.r || Math.max(e.dims.w || 0, e.dims.d || 0) / 2, 9)), 0, Math.PI * 2);
+                if (MINI.photo) { g.strokeStyle = STATE_COL[st]; g.lineWidth = 2.2 / k; g.stroke(); } else { g.fillStyle = STATE_COL[st]; g.fill(); }
                 if (WALK.target === e) { g.strokeStyle = '#f08a6b'; g.lineWidth = 3 / k; g.stroke(); }
             });
             g.restore();
@@ -4126,16 +4660,17 @@ canvas{touch-action:none}
         function inColl(e) { return collection.includes(e.id); }
         function addColl(e) {
             if (inColl(e)) { toast(`${e.id} zaten koleksiyonunda.`); return false; }
-            if (collection.length >= MAX) { toast(`Koleksiyon dolu (${MAX}/${MAX}). Yeni bina eklemek için önce birini çıkar.`, 'Koleksiyonu aç', () => openColl()); return false; }
-            collection.push(e.id); saveCollection(); refreshColl(); toast(`${name(e)} koleksiyona eklendi (${collection.length}/${MAX}).`);
+            if (collection.length >= MAX) { toast(`Seçkin dolu (${MAX}/${MAX}). Yeni bir bina için önce birini bırak.`, 'Seçkiyi aç', () => openColl()); return false; }
+            collection.push(e.id); saveCollection(); refreshColl(); toast(`${name(e)} seçkine katıldı · ${collection.length}/${MAX} · su hattında altın bir iplik artık onu senin olarak işaretliyor.`);
             return true;
         }
         function removeColl(e) {
             const i = collection.indexOf(e.id); if (i < 0) return;
-            collection.splice(i, 1); saveCollection(); refreshColl(); toast(`${e.id} koleksiyondan çıkarıldı.`);
+            collection.splice(i, 1); saveCollection(); refreshColl(); toast(`${name(e)} seçkinden ayrıldı.`);
         }
         function toggleColl(e) { if (inColl(e)) removeColl(e); else addColl(e); }
         function refreshColl() {
+            syncAwake();
             refreshStatus(true);
             if ($('#su-map').classList.contains('show')) renderAside();
             $('#su-count').textContent = collection.length;
@@ -4163,14 +4698,22 @@ canvas{touch-action:none}
             camera.clearViewOffset(); camera.updateProjectionMatrix();
             viewOff.x = viewOff.y = viewOff.tx = viewOff.ty = 0;
         }
+        // Ekranda binanın gerçekten görünebileceği dikdörtgen: üst çubuklar ve inceleme paneli (alt sayfa / yan panel) düşülür.
+        // Hem kadraj mesafesi hem de görüntü merkezi bu alana göre hesaplanır → telefonda bina kartın arkasında kalmaz.
+        function visRect() {
+            const W = window.innerWidth, H = window.innerHeight, v = { l: 0, t: 0, r: W, b: H };
+            const p = $('#su-insp');
+            if (!insp.e || !p || p.classList.contains('min')) return v;
+            const sheet = p.offsetWidth >= W - 4;
+            if (sheet) v.b = H - p.offsetHeight; else v.r = W - p.offsetWidth;
+            ['#su-top', '#su-ibar'].forEach(sel => { const el = $(sel); if (!el || el.offsetParent === null) return; const r = el.getBoundingClientRect(); if (r.height > 0 && r.left < v.r && r.bottom < v.b - 80) v.t = Math.max(v.t, r.bottom + 6); });
+            if (v.b - v.t < 120) v.t = Math.max(0, v.b - 120);
+            return v;
+        }
         function applyViewOffset(dt) {
             const W = window.innerWidth, H = window.innerHeight;
             viewOff.tx = 0; viewOff.ty = 0;
-            const p = $('#su-insp');
-            if (insp.e && p.classList.contains('open') && !p.classList.contains('min')) {
-                const r = p.getBoundingClientRect();
-                if (r.top > 2) viewOff.ty = (H - r.top) / 2; else viewOff.tx = (W - r.left) / 2;
-            }
+            if (insp.e) { const v = visRect(); viewOff.tx = W / 2 - (v.l + v.r) / 2; viewOff.ty = H / 2 - (v.t + v.b) / 2; }
             const k = 1 - Math.exp(-dt * 6);
             viewOff.x += (viewOff.tx - viewOff.x) * k; viewOff.y += (viewOff.ty - viewOff.y) * k;
             if (Math.abs(viewOff.x) + Math.abs(viewOff.y) > 0.5) camera.setViewOffset(W, H, viewOff.x, viewOff.y, W, H);
@@ -4180,7 +4723,8 @@ canvas{touch-action:none}
             return out.set(focus.x + Math.cos(az) * Math.cos(el) * dist, Math.max(WATER_Y + 1.8, focus.y + Math.sin(el) * dist), focus.z + Math.sin(az) * Math.cos(el) * dist);
         }
         function fitDist(g, fovDeg) {
-            const v = THREE.MathUtils.degToRad(fovDeg), h = 2 * Math.atan(Math.tan(v / 2) * Math.max(0.3, window.innerWidth / window.innerHeight));
+            const W = window.innerWidth, H = window.innerHeight, vr = visRect(), fy = Math.max(0.2, (vr.b - vr.t) / H), fx = Math.max(0.2, (vr.r - vr.l) / W);
+            const t = Math.tan(THREE.MathUtils.degToRad(fovDeg) / 2), v = 2 * Math.atan(t * fy), h = 2 * Math.atan(t * Math.max(0.3, W / H) * fx);
             return g.R / Math.sin(Math.min(v, h) / 2) * 0.92 + 4;
         }
         const _ray = new THREE.Raycaster(), _v = new THREE.Vector3(), _w = new THREE.Vector3();
@@ -4234,9 +4778,10 @@ canvas{touch-action:none}
                 if (first) { camera.fov = 50; camera.updateProjectionMatrix(); }
             }
             selectBuilding(e.mesh);
+            { const g = geom(e), off = Math.max(g.hw, g.hd) + 9; LIVE_ENV.focus(g.cx + Math.cos(g.frontAz) * off, clamp(g.center.y, 6, 40), g.cz + Math.sin(g.frontAz) * off); }
             if (window.SU_ART) SU_ART.raise(Array.isArray(e.mesh.material) ? e.mesh.material[0] : e.mesh.material);
             renderInspect();
-            $('#su-insp').classList.add('open'); $('#su-insp').classList.remove('min');
+            $('#su-insp').classList.add('open'); $('#su-insp').classList.remove('min'); ui.classList.add('inspecting');
             $('#su-ibar').classList.add('show');
             $('#su-insp').scrollTop = 0;
             perspective((opts && opts.persp) || 'front');
@@ -4244,9 +4789,9 @@ canvas{touch-action:none}
         function closeInspect() {
             if (!insp.e) return;
             if (window.SU_ART) SU_ART.lower();
-            insp.e = null;
+            insp.e = null; LIVE_ENV.unfocus();
             deselectBuilding();
-            $('#su-insp').classList.remove('open', 'min');
+            $('#su-insp').classList.remove('open', 'min'); ui.classList.remove('inspecting');
             $('#su-ibar').classList.remove('show');
             if (tour.active) { if (tour.paused) setPaused(true); else { tour.blend = 1; tour.blendFrom.copy(camera.position); tour.blendLook.copy(lastLook); } }
             releaseCamera();
@@ -4278,6 +4823,7 @@ canvas{touch-action:none}
                     <img id="su-artimg" src="${esc(url)}" alt="Orijinal eser ${esc(file)}" data-a="viewer">
                     <figcaption class="su-artmeta" id="su-artmeta">${esc(file)} · ${a && a.w ? `${a.w} × ${a.h} px (orijinal)` : 'çözünürlük okunuyor…'}</figcaption>
                 </figure>
+                ${colorQuestion(e) ? `<div class="su-cq"><div class="su-kicker">Rengin sorusu</div><p><b>${esc(colorQuestion(e).word)}</b> soruyor: ${esc(colorQuestion(e).q)}</p>${swatches(e, 16)}<small>Şehrin bu eserin renklerinden duyduğu soru; eserin adı değildir. Palet yaklaşık, esere uygulanmaz.</small></div>` : ''}
                 <div class="su-actions" id="su-iact"></div>
                 <section class="su-sec"><h3>Mimari pasaport</h3><dl class="su-dl">
                     <dt>Bina ID</dt><dd>${esc(e.id)}</dd>
@@ -4335,14 +4881,25 @@ canvas{touch-action:none}
             const e = insp.e; if (!e) return;
             const done = isDiscovered(e), el = $('#su-disc'), dz = $('#su-dstate');
             setRing(el, insp.dwell / DWELL, done);
-            if (el) { el.classList.toggle('done', done); el.querySelector('span').textContent = done ? 'Keşfedildi' : `Keşfediliyor ${Math.max(0, DWELL - insp.dwell).toFixed(1)} sn`; }
-            if (dz) dz.textContent = done ? 'Keşfedildi' : `Keşfediliyor — ${Math.max(0, Math.ceil(DWELL - insp.dwell))} sn daha incele`;
+            if (el) { el.classList.toggle('done', done); el.querySelector('span').textContent = done ? 'Uyandı' : `Uyanıyor ${Math.max(0, DWELL - insp.dwell).toFixed(1)} sn`; }
+            if (dz) dz.textContent = done ? 'Uyandı' : `Uyanıyor — ${Math.max(0, Math.ceil(DWELL - insp.dwell))} sn daha bak`;
         }
         function downloadJSON(e) {
             const blob = new Blob([JSON.stringify(metadata(e), null, 2)], { type: 'application/json' });
             const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${e.id}.json`;
             document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
         }
+        // v3 · seçki manifestosu: mint akışına hazır, yerel seçimin temiz dışa aktarımı (sahiplik kaydı değildir)
+        function exportCollection() {
+            if (!collection.length) { toast('Seçkin henüz boş.'); return; }
+            const out = { schema: 'sucity.collection/1', city: 'SU CITY · Deniz Şehri', artist: 'Büşra Su Haydar', created: new Date().toISOString(), max: MAX, count: collection.length,
+                note: 'Bu tarayıcıdaki yerel seçimdir; zincir üstü sahiplik kaydı değildir.', buildings: collection.map(id => metadata(byId.get(id))) };
+            const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `sucity-secki-${collection.length}.json`;
+            document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+            toast(`Seçki manifestosu indirildi · ${collection.length} bina`);
+        }
+        api.exportCollection = exportCollection;
         api.mintIntegrationPoint = async function (meta) { throw new Error('Mint entegrasyonu bağlı değil. Cüzdan/kontrat bağlandığında bu fonksiyon metadata ile çağrılmalı.'); };
 
         // ---------------------- PAN-ZOOM (eser görüntüleyici ve harita) ----------------------
@@ -4567,7 +5124,8 @@ canvas{touch-action:none}
             if (full || hudEntry !== e || hudPhase !== tour.phase) {
                 hudEntry = e; hudPhase = tour.phase;
                 $('#su-tname').textContent = name(e);
-                const st = isDiscovered(e) ? 'Keşfedildi' : (present ? 'Keşfediliyor' : 'Keşfedilmedi');
+                const cq = colorQuestion(e); $('#su-tq').textContent = cq && present ? `${cq.word} soruyor: ${cq.q}` : '';
+                const st = isDiscovered(e) ? 'Uyandı' : (present ? 'Uyanıyor' : 'Uykuda');
                 $('#su-tsub').textContent = `${present ? '' : 'Geçiş · '}${st} · ${DISTRICT_TR[e.district]} · ${(ROOF[e.roof] || ['—'])[0]} · ${tour.label} ${tour.idx + 1} / ${tour.list.length}`;
                 $('#su-t-play').innerHTML = tour.paused ? ICON.play : ICON.pause;
                 $('#su-t-play').setAttribute('aria-label', tour.paused ? 'Devam et' : 'Duraklat');
@@ -4628,7 +5186,7 @@ canvas{touch-action:none}
             });
             for (let i = collection.length; i < MAX; i++) cells.push(`<div class="su-empty">Boş vitrin ${i + 1}<br>Şehirde bir binaya dokun ve ekle</div>`);
             $('#su-cgrid').innerHTML = cells.join('');
-            $('#su-ctour').disabled = !collection.length; $('#su-cclear').disabled = !collection.length;
+            $('#su-ctour').disabled = !collection.length; $('#su-cclear').disabled = !collection.length; $('#su-cexport').disabled = !collection.length;
             snapQueue = collection.filter(id => !snaps.has(id)).map(id => byId.get(id)); pumpSnaps();
         }
 
@@ -4664,7 +5222,7 @@ canvas{touch-action:none}
                 <div class="su-stat"><div>Toplam bina<b>${N}</b></div><div>Keşfedilen<b>${d}</b></div><div>Kalan<b>${N - d}</b></div><div>İlerleme<b>%${pct.toFixed(1)}</b></div></div>
                 <div class="su-bar" style="margin:12px 0 4px"><i style="width:${pct.toFixed(2)}%"></i></div>
                 <dl class="su-dl" style="margin-top:14px"><dt>Bulunduğun bölge</dt><dd>${esc(c.district)}</dd><dt>Şu an</dt><dd>${esc(c.what)}</dd><dt>Gezilen yollar</dt><dd>%${(coverageCache * 100).toFixed(1)} boyandı</dd><dt>Koleksiyon</dt><dd>${collection.length} / ${MAX}</dd></dl>
-                <p style="color:var(--mute);font-size:12px;margin:12px 0 0">Bir bina; yanından geçerken ${WALK_NEED} saniye kadrajda tutulduğunda, ${DWELL} saniye incelendiğinde, eseri 2 saniye tam ekran açıldığında ya da turda 11 saniyelik sunumu sonuna kadar izlendiğinde keşfedilmiş sayılır. İlerlemeyi ekrandaki halkadan izlersin.</p>
+                <p style="color:var(--mute);font-size:12px;margin:12px 0 0">Her bina uykudadır. Yanından geçerken ${WALK_NEED} saniye ona bakarsan, ${DWELL} saniye incelersen, eserini 2 saniye tam ekran açarsan ya da turda 11 saniyelik sunumunu sonuna kadar izlersen uyanır. Baktıkça cephesi tabandan yukarı ışıkla dolar; uyandığında ışık göğe yayılır ve rengi sana bir soru sorar.</p>
                 <div class="su-actions">
                     <button class="su-btn gold" data-a="guide">${ICON.route} ${ROUTE.active ? 'Rehberli keşfi bitir' : 'Rehberli keşfi başlat'}</button>
                     <button class="su-btn" data-a="nearest">${ICON.pin} En yakın keşfedilmemiş bina</button>
@@ -4985,7 +5543,7 @@ canvas{touch-action:none}
                 <div id="su-seek" aria-hidden="true">${ringSVG()}<div><b></b><i></i></div></div>
                 <button id="su-guide" class="su-glass su-btn" aria-label="Rehberli keşif" title="Rehberli keşif (G): seni tüm binalardan geçiren ışıklı boya">${ICON.route}<span>Rehberli keşif</span></button>
                 <div id="su-route" class="su-glass"><span class="dot"></span><span id="su-route-t"></span><button class="su-btn" id="su-route-x">Bitir</button></div>
-                <button id="su-status" class="su-glass" aria-label="Keşif atlasını aç"><div class="l1"><span>Keşif</span><b id="su-st-n">0</b><span id="su-st-t"></span><span id="su-st-p" style="margin-left:auto;color:var(--mute)"></span></div><div class="su-bar"><i id="su-st-bar"></i></div><div class="l2" id="su-st-ctx"></div></button>
+                <button id="su-status" class="su-glass" aria-label="Keşif atlasını aç"><div class="l1"><span>Uyanan</span><b id="su-st-n">0</b><span id="su-st-t"></span><span id="su-st-p" style="margin-left:auto;color:var(--mute)"></span></div><div class="su-bar"><i id="su-st-bar"></i></div><div class="l2" id="su-st-ctx"></div></button>
                 <div id="su-time" class="su-glass" role="dialog" aria-label="Günün saati">
                     <div class="su-trow"><div><div class="su-kicker">Günün saati</div><b id="su-tl">10:24</b> <span id="su-tp" style="color:var(--mute)"></span></div><button class="su-btn icon" id="su-tplay" aria-label="Zamanı akıt"></button></div>
                     <input type="range" id="su-tslider" min="0" max="24" step="0.05" aria-label="Saat">
@@ -5002,7 +5560,7 @@ canvas{touch-action:none}
                 </div>
                 <div id="su-tour" class="su-glass" role="region" aria-label="Sinematik tur">
                     <div class="su-ring"><svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="22" stroke="rgba(255,255,255,.14)" stroke-width="4" fill="none"/><circle id="su-ringfg" cx="26" cy="26" r="22" stroke="#e9c46a" stroke-width="4" fill="none" stroke-linecap="round" stroke-dasharray="138.2" stroke-dashoffset="0"/></svg><b id="su-ringtxt">11</b></div>
-                    <div class="su-tinfo"><div class="su-tname" id="su-tname"></div><div class="su-tsub" id="su-tsub"></div><div class="su-bar"><i id="su-tbar"></i></div></div>
+                    <div class="su-tinfo"><div class="su-tname" id="su-tname"></div><div class="su-tq" id="su-tq"></div><div class="su-tsub" id="su-tsub"></div><div class="su-bar"><i id="su-tbar"></i></div></div>
                     <div class="su-tbtns">
                         <button class="su-btn icon" id="su-t-prev" aria-label="Önceki bina" title="Önceki bina">${ICON.prev}</button>
                         <button class="su-btn icon" id="su-t-play" aria-label="Duraklat">${ICON.pause}</button>
@@ -5023,12 +5581,13 @@ canvas{touch-action:none}
                 </div>
                 <aside id="su-insp" class="su-glass" aria-label="Bina inceleme"><div id="su-insp-body"></div></aside>
                 <section id="su-coll" class="su-modal su-glass" aria-label="Koleksiyonum">
-                    <div class="su-mhead"><h2>Koleksiyonum <span class="su-counter" id="su-ccount">0 / 11</span></h2>
+                    <div class="su-mhead"><h2>Seçkin <span class="su-counter" id="su-ccount">0 / 11</span></h2>
                         <button class="su-btn" id="su-ctour">${ICON.tour} Portföy turu</button>
                         <button class="su-btn" id="su-cmap">${ICON.map} Haritada</button>
+                        <button class="su-btn" id="su-cexport">${ICON.dl} Manifesto</button>
                         <button class="su-btn danger" id="su-cclear">${ICON.trash} Temizle</button>
                         <button class="su-btn icon" data-close aria-label="Kapat">${ICON.close}</button></div>
-                    <div class="su-mbody"><p style="margin:0 0 14px;color:var(--mute)">En fazla 11 farklı bina. Seçimin bu tarayıcıda saklanır; sayfayı yenilesen de kaybolmaz. Bu bir seçki listesidir, sahiplik kaydı değildir.</p><div class="su-grid" id="su-cgrid"></div></div>
+                    <div class="su-mbody"><p style="margin:0 0 14px;color:var(--mute)">En fazla 11 bina; her biri bir soru, bir hikâye. Seçimin bu tarayıcıda saklanır ve yenilesen de kalır. Bu bir seçki listesidir, sahiplik kaydı değildir; Manifesto ile mint'e hazır meta veriyi indirebilirsin.</p><div class="su-grid" id="su-cgrid"></div></div>
                 </section>
                 <section id="su-map" class="su-modal su-glass" aria-label="Şehir haritası">
                     <div class="su-mhead"><h2>Keşif atlası</h2>
@@ -5062,6 +5621,7 @@ canvas{touch-action:none}
                 <div id="su-confirm" class="su-glass" role="alertdialog"><p id="su-cmsg" style="margin:0 0 16px"></p><div style="display:flex;gap:8px;justify-content:flex-end"><button class="su-btn" id="su-ccancel">Vazgeç</button><button class="su-btn gold" id="su-cok">Tamam</button></div></div>
                 <div id="su-joy" class="su-glass" aria-label="Hareket"><i></i></div>
                 <div id="su-toast" class="su-glass" role="status" aria-live="polite"></div>
+                <div id="su-awake" class="su-glass" role="status" aria-live="polite"></div>
                 <div id="su-dropall">Modeli şehre eklemek için bırak</div>`;
             document.body.appendChild(ui);
         }
@@ -5092,7 +5652,7 @@ canvas{touch-action:none}
                 else if (a === 'coll') toggleColl(e);
                 else if (a === 'viewer') openViewer(e);
                 else if (a === 'explore') { $('#su-insp').classList.add('min'); perspective('cine'); }
-                else if (a === 'panel') $('#su-insp').classList.toggle('min');
+                else if (a === 'panel') { $('#su-insp').classList.toggle('min'); perspective(insp.persp || 'front'); }
                 else if (a === 'json') downloadJSON(e);
                 else if (a === 'mapgo') openMap(e);
             };
@@ -5106,6 +5666,7 @@ canvas{touch-action:none}
             });
             $('#su-ctour').onclick = () => startTour(true);
             $('#su-cmap').onclick = () => openMap();
+            $('#su-cexport').onclick = () => exportCollection();
             $('#su-status').onclick = () => $('#su-map').classList.contains('show') ? closeModals() : openMap(insp.e);
             $('#su-guide').onclick = () => toggleGuide();
             $('#su-unhide').onclick = () => toggleHidden();
@@ -5121,7 +5682,7 @@ canvas{touch-action:none}
                 else if (b.dataset.a === 'guide') { toggleGuide(); renderAside(); }
                 else if (b.dataset.a === 'me' && car) { ATLAS.target.set(car.position.x, 0, car.position.z); ATLAS.dist = Math.min(ATLAS.dist, 320); ATLAS.el = Math.min(ATLAS.el, 0.9); }
                 else if (b.dataset.a === 'paint') confirmBox('Geçtiğin yerlerdeki tüm boya silinsin mi? Keşif ilerlemen etkilenmez.', 'Boyayı temizle', () => { PAINT.clear(); ROUTE.reset(); coverageT = -1e9; renderAside(); toast('Gezi boyası temizlendi.'); });
-                else if (b.dataset.a === 'reset') confirmBox(`${discovered.size} binalık keşif ilerlemesi sıfırlansın mı? Koleksiyonun etkilenmez.`, 'Keşfi sıfırla', () => { discovered = new Set(); discHistory = []; saveDiscovery(); refreshStatus(true); renderAside(); drawMap(); toast('Keşif ilerlemesi sıfırlandı.'); });
+                else if (b.dataset.a === 'reset') confirmBox(`${discovered.size} binalık keşif ilerlemesi sıfırlansın mı? Koleksiyonun etkilenmez.`, 'Keşfi sıfırla', () => { discovered = new Set(); discHistory = []; saveDiscovery(); syncAwake(); refreshStatus(true); renderAside(); drawMap(); toast('Bütün ruhlar yeniden uykuya daldı.'); });
             });
             $('#su-cclear').onclick = () => confirmBox(`Koleksiyondaki ${collection.length} bina çıkarılsın mı? Bu işlem geri alınamaz.`, 'Koleksiyonu temizle', () => { collection = []; saveCollection(); refreshColl(); toast('Koleksiyon temizlendi.'); });
             $('#su-ccancel').onclick = closeConfirm; $('#su-scrim').onclick = closeConfirm;
@@ -5263,31 +5824,21 @@ canvas{touch-action:none}
         let viewerT = 0;
         api.frame = function (dt) {
             updateWalkDiscovery(dt);
+            {
+                let fe = null, fp = 0; const te = tour.active ? tour.list[tour.idx] : null;
+                if (insp.e && !isDiscovered(insp.e)) { fe = insp.e; fp = insp.dwell / DWELL; }
+                else if (te && tour.phase === 'present' && !isDiscovered(te)) { fe = te; fp = tour.t / SHOT; }
+                else if (WALK.target && !isDiscovered(WALK.target)) { fe = WALK.target; fp = (WALK.prog.get(WALK.target.id) || 0) / WALK_NEED; }
+                AWAKE.focus(fe, fp);
+                const wt = !insp.e && !tour.active && WALK.target && !isDiscovered(WALK.target) ? WALK.target : null;
+                AWAKE.setTether(wt, wt ? fp : 0, wt ? geom(wt).center.y : 0);
+            }
             drawMini(dt);
             if ($('#su-map').classList.contains('show')) { Object.assign(ATLAS.rect, mapRect()); drawMap(); }
             statusT += dt; if (statusT > 0.4) { statusT = 0; refreshStatus(); refreshGuide(); }
             tpT += dt; if (tpT > 0.2) { tpT = 0; updateTimePanel(); }
             if (viewerEntry && $('#su-viewer').classList.contains('show')) { viewerT += dt; if (viewerT >= 2) markDiscovered(viewerEntry, 'art'); } else viewerT = 0;
-            if (!perf.prMax) perf.prMax = renderer.getPixelRatio();
-            perf.acc += dt; perf.n++; perf.t += dt; perf.cool = Math.max(0, perf.cool - dt);
-            if (perf.t < 2.5 || perf.cool > 0) return;
-            const avg = perf.acc / perf.n; perf.acc = perf.n = perf.t = 0;
-            const pr = renderer.getPixelRatio();
-            if (ATLAS.on) return;
-            if (avg > 0.026) {
-                // önce yansıma güncelleme sıklığı ve su efektleri düşer; binaların netliği (piksel yoğunluğu) en son feda edilir
-                if (LIVE_ENV.every < 3) { LIVE_ENV.every++; perf.cool = 3; return; }
-                if (SPH_ENV.every < 6) { SPH_ENV.every += 2; perf.cool = 3; return; }
-                if (LG.scale > 0.4) { LG.scale = Math.max(0.4, LG.scale - 0.1); perf.cool = 3; return; }
-                else if (refr.on) { setRefraction(false); perf.refrOff = true; }
-                else if (mirror.scale > 0.5) mirror.scale = Math.max(0.5, mirror.scale - 0.1);
-                else if (pr > 1.5) renderer.setPixelRatio(Math.max(1.5, pr - 0.25));
-                else if (pr > 1) renderer.setPixelRatio(Math.max(1, pr - 0.25));
-                else { perf.cool = 10; return; }
-                renderer.setSize(window.innerWidth, window.innerHeight); resizeWaterTargets(); perf.cool = 3;
-            } else if (avg < 0.0135 && pr < perf.prMax) {
-                renderer.setPixelRatio(Math.min(perf.prMax, pr + 0.25)); renderer.setSize(window.innerWidth, window.innerHeight); resizeWaterTargets(); perf.cool = 6;
-            }
+            // uyarlanabilir kalite artık motor tarafındaki GOV yöneticisinde (kare süresi dağılımı + 30 Hz kilidi + geri alınabilir kademe yığını)
         };
         api.openInspect = id => openInspect(byId.get(id));
         api.addToCollection = id => addColl(byId.get(id));
