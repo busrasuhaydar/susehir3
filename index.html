@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#05080e">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>SU CITY · Deniz Şehri · v5</title>
+    <title>SU CITY · Deniz Şehri · v6</title>
     <style>
         html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
         canvas { display: block; touch-action: none; }
@@ -137,6 +137,22 @@ canvas{touch-action:none}
         const sstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
         // ===================== SHADER'LAR =====================
+        // v6 · deniz yüzeyinin yüksekliği: okyanus gölgelendiricisiyle birebir aynı dalgalar ve aynı yerel sönümleme (waveK).
+        // Su üstünde duran düz yüzeyler (köpük halkaları, mum ışık havuzları) bununla dalganın üstüne oturur → dalga içinden geçip
+        // titreşmez, yırtılmaz.
+        const SEA_WAVE = { value: 1.0 };
+        const SEA_SEG = IS_MOBILE ? 128 : 192;
+        const GLSL_SEA = `
+            float seaWK(float L, float sp){ return smoothstep(3.0 * sp, 5.5 * sp, L); }
+            float seaG(vec2 dir, float L, float A, vec2 p, float t){ vec2 d = normalize(dir); float k = 6.2831853 / L; float c = sqrt(9.8 / k); return A * sin(k * (dot(d, p) - c * t)); }
+            float seaH(vec2 p, float t, float wv){
+                float dl = length(p - cameraPosition.xz);
+                float sp = max(1.1 + 0.034 * dl, 6.2832 * dl / ${SEA_SEG.toFixed(1)});
+                float amp = wv * mix(0.22, 1.0, smoothstep(610.0, 1150.0, length(p))) * (1.0 - smoothstep(1600.0, 5200.0, dl));
+                return seaG(vec2(1.0, 0.25), 96.0, 0.80 * amp * seaWK(96.0, sp), p, t) + seaG(vec2(0.8, -0.6), 57.0, 0.46 * amp * seaWK(57.0, sp), p, t)
+                     + seaG(vec2(-0.3, 1.0), 33.0, 0.25 * amp * seaWK(33.0, sp), p, t) + seaG(vec2(0.95, 0.5), 19.0, 0.13 * amp * seaWK(19.0, sp), p, t)
+                     + seaG(vec2(-0.7, -0.4), 11.0, 0.065 * amp * seaWK(11.0, sp), p, t) + seaG(vec2(0.2, -1.0), 6.3, 0.03 * amp * seaWK(6.3, sp), p, t);
+            }`;
         const GLSL_NOISE = `
             float qh(vec2 p){ return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5453); }
             float qn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
@@ -1625,7 +1641,7 @@ canvas{touch-action:none}
             update(dt) {
                 this.t += dt; if (this.t < 0.4 || !camera) return; this.t = 0;
                 const cp = camera.position, n2 = this.near * this.near, sel = SEL && SEL.building;
-                this.list.forEach(e => { const m = e.mesh, L = e.lod; if (m === sel || m.position.distanceToSquared(cp) < n2) this.hi(e); else if (m.geometry !== L.lo) m.geometry = L.lo; });
+                const f2 = n2 * 1.32; this.list.forEach(e => { const m = e.mesh, L = e.lod, d2 = m.position.distanceToSquared(cp); if (m === sel || d2 < n2) this.hi(e); else if (d2 > f2 && m.geometry !== L.lo) m.geometry = L.lo; });
             }
         };
         function createBuildings() {
@@ -2046,8 +2062,16 @@ canvas{touch-action:none}
             const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
             const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,196,120,0.9)'); gr.addColorStop(0.4, 'rgba(255,170,90,0.28)'); gr.addColorStop(1, 'rgba(255,150,80,0)');
             g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
-            const poolMat = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending });
-            const pg = new THREE.PlaneGeometry(7, 7); pg.rotateX(-Math.PI / 2);
+            // v6 · mum ışık havuzu dalgayı izler (düz disk dalganın içinden geçince titriyordu)
+            const poolMat = new THREE.ShaderMaterial({
+                uniforms: { uMap: { value: new THREE.CanvasTexture(c) }, uOp: { value: 0 }, uTime: U.time, uWave: SEA_WAVE },
+                vertexShader: `uniform float uTime; uniform float uWave; varying vec2 vUv;
+                    ${GLSL_SEA}
+                    void main(){ vUv = uv; vec4 w = modelMatrix * instanceMatrix * vec4(position, 1.0); w.y = max(w.y - 0.2, ${WATER_Y.toFixed(2)} + seaH(w.xz, uTime, uWave) + 0.07); gl_Position = projectionMatrix * viewMatrix * w; }`,
+                fragmentShader: `uniform sampler2D uMap; uniform float uOp; varying vec2 vUv; void main(){ vec4 t = texture2D(uMap, vUv); gl_FragColor = vec4(t.rgb * t.a * uOp, 1.0); }`,
+                transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8
+            });
+            const pg = new THREE.PlaneGeometry(7, 7, 8, 8); pg.rotateX(-Math.PI / 2);
             const pools = new THREE.InstancedMesh(pg, poolMat, N);
             [wax, dish, wick, pools].forEach(m => { m.frustumCulled = false; scene.add(m); });
             wax.castShadow = true; dish.renderOrder = 6; pools.renderOrder = 7;
@@ -2072,7 +2096,7 @@ canvas{touch-action:none}
             upd(0);
             let fc = 0;
             updaters.push((dt, t) => { if ((fc++ & 1) === 0) upd(t); });
-            nightHooks.push(n => { fmat.uniforms.uGlow.value = n; halo.material.uniforms.uOpacity.value = 0.18 + 0.75 * n; poolMat.opacity = 0.08 + 0.5 * n; waxMat.emissiveIntensity = 0.05 + 0.35 * n; });
+            nightHooks.push(n => { fmat.uniforms.uGlow.value = n; halo.material.uniforms.uOpacity.value = 0.18 + 0.75 * n; poolMat.uniforms.uOp.value = 0.08 + 0.5 * n; waxMat.emissiveIntensity = 0.05 + 0.35 * n; });
         }
         function mergeSimple(geos, colors) {
             const P = [], N = [], C = [];
@@ -2147,7 +2171,7 @@ canvas{touch-action:none}
                 col = col * dif * mix(1.0, 0.62, uNight) + uSunCol * spec * 0.35 + vec3(0.75, 0.85, 1.0) * fr * 0.1 + vec3(1.0) * men * 0.12 * (1.0 - uNight * 0.7);
                 gl_FragColor = vec4(min(col, vec3(0.92)), 1.0);
             }`;
-        const PAINT = {
+        const PAINT_C = {
             geos: [], N: SAFE_MODE ? 1024 : IS_MOBILE ? (Q.tier >= 1 ? 1536 : 1280) : 2048, EXT: 615, canvas: null, ctx: null, tex: null, mesh: null, last: null, dirty: false, upT: 0, saveT: 0, changed: false, key: 'sucity.paint.v6', data: null, dataDirty: true,
             s: 0, near: null, nearAt: null, nearPal: [], spread: [], spT: 0, SPMAX: SAFE_MODE ? 60 : IS_MOBILE ? 140 : 260,
             init() {
@@ -2258,6 +2282,458 @@ canvas{touch-action:none}
                 for (let i = 0; i < roadPts.length; i += 3) { n++; if (this.at(roadPts[i].x, roadPts[i].z) > 0.5) hit++; }
                 return n ? hit / n : 0;
             }
+        };
+
+        // ===================== v6 · AKRİLİK DÖKÜM AKIŞI (GPU sıvı simülasyonu) =====================
+        // Ruh yürürken yola gerçek bir boya dökülür ve boya GPU'da fiziğe dayalı bir ince-film akışkanı olarak yayılır:
+        //  · viskoz yerçekimi akışı (yağlama yaklaşımı): akı ∝ h³·∇h → kalın boya hızlı, inceldikçe yavaşlayarak yayılır
+        //  · akma gerilmesi (Bingham): eğim eşik altına inince boya durur, kenarlar doğal bir cephede donar
+        //  · yerel viskozite gürültüsü: cephe düz değil, organik parmaklar ve diller halinde ilerler
+        //  · yüzey gerilimi ve menisküs: ekran gölgelendiricisinde kenar kalınlaşması ve ıslak parlak sınır
+        //  · renk taşınımı: kütle korumalı rüzgâr-yönlü (upwind) taşıma + akış sırasında kıvrımlı (curl) karıştırma → mermerleşme
+        //  · hücreler: boyanın 'yaşı' ve akışla biriken yer değiştirmesiyle taşınan (donmuş) koordinatlarda Voronoi; hücreler renk
+        //    sınırlarında yoğunlaşır, zamanla büyür, akış yönünde uzar; içleri alttaki katmanın rengini gösterir, çevrelerinde dantel
+        // Alan yol maskesiyle sınırlıdır (yalnız cam yol yüzeyi), hesap yalnız ruhun çevresindeki pencerede yapılır (mobilde de hafif).
+        // Renkler o anda en yakın binaların eser paletlerinden gelir ve yürüdükçe sürekli değişir.
+        const FLOW_QUAD_VS = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
+        const FLOW_COMMON = `
+            uniform sampler2D uS; uniform sampler2D uM; uniform vec4 uRect; uniform float uTx; uniform float uMeter; uniform float uDt;
+            uniform float uK; uniform float uTau; uniform float uExt; uniform vec4 uSrcA; uniform vec2 uSrcB; uniform float uTime;
+            varying vec2 vUv;
+            ${GLSL_NOISE}
+            vec2 gUv; float gH0; float gM0;
+            float inRect(vec2 u){ return step(uRect.x, u.x) * step(uRect.y, u.y) * step(u.x, uRect.x + uRect.z) * step(u.y, uRect.y + uRect.w); }
+            // komşudan bu hücreye bir adımda gelen boya miktarı (eksi: dışarı akan)
+            float flowFrom(vec2 o, float w, out vec4 sj){
+                vec2 u = gUv + o * uTx;
+                sj = texture2D(uS, u);
+                float mj = texture2D(uM, u).r;
+                float hm = 0.5 * (sj.a + gH0);
+                float kv = 0.45 + 1.1 * texture2D(uM, gUv + 0.5 * o * uTx).g; // yerel viskozite (maskede hazır; iki hücre arasında simetrik)
+                float ddt = min(uK * kv * hm * hm * hm * uDt / (uMeter * uMeter), 0.25);
+                float d = sj.a - gH0;
+                float e = sign(d) * max(abs(d) - uTau * uMeter * length(o), 0.0);
+                return ddt * e * w * step(0.5, mj) * step(0.5, gM0) * inRect(u);
+            }
+            float pourAdd(){
+                vec2 pa = gUv - uSrcA.xy, ba = uSrcB - uSrcA.xy;
+                float tt = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-12), 0.0, 1.0);
+                float dd = length(pa - ba * tt) / max(uSrcA.z, 1e-6);
+                vec2 wp = (gUv - 0.5) * 2.0 * uExt;
+                float splash = 0.7 + 0.6 * qn(wp * 1.3 + vec2(uTime * 2.0, -uTime * 1.3));
+                return uSrcA.w * uDt * exp(-dd * dd * 2.5) * splash * step(0.5, gM0);
+            }`;
+        const FLOW_S_FS = FLOW_COMMON + `
+            uniform vec3 uSrcCol;
+            vec3 gC0; vec2 gSw;
+            void nb(vec2 o, float w, inout vec3 acc, inout float hn){
+                vec4 sj; float f = flowFrom(o, w, sj);
+                if (f > 0.0) {
+                    // içeri akan boyanın rengi biraz kıvrılmış bir noktadan alınır → akarken mermer şeritleri oluşur
+                    vec4 sw = texture2D(uS, gUv + (o + gSw) * uTx);
+                    vec3 cj = sw.a > 0.02 ? sw.rgb / sw.a : (sj.a > 1e-4 ? sj.rgb / sj.a : gC0);
+                    acc += f * cj;
+                } else acc += f * gC0;
+                hn += f;
+            }
+            void main(){
+                gUv = uRect.xy + vUv * uRect.zw;
+                vec4 s0 = texture2D(uS, gUv);
+                gM0 = texture2D(uM, gUv).r; gH0 = s0.a;
+                gC0 = gH0 > 1e-4 ? s0.rgb / gH0 : vec3(0.0);
+                vec2 wp = (gUv - 0.5) * 2.0 * uExt;
+                vec2 P = wp * 0.09 + vec2(uTime * 0.03, -uTime * 0.02);
+                float n1 = qn(P + vec2(0.0, 0.1)), n2 = qn(P - vec2(0.0, 0.1)), n3 = qn(P + vec2(0.1, 0.0)), n4 = qn(P - vec2(0.1, 0.0));
+                gSw = vec2(n1 - n2, n4 - n3) * 6.0;
+                vec3 acc = s0.rgb; float hn = gH0;
+                nb(vec2( 1.0,  0.0), 0.6667, acc, hn); nb(vec2(-1.0,  0.0), 0.6667, acc, hn);
+                nb(vec2( 0.0,  1.0), 0.6667, acc, hn); nb(vec2( 0.0, -1.0), 0.6667, acc, hn);
+                nb(vec2( 1.0,  1.0), 0.1667, acc, hn); nb(vec2(-1.0,  1.0), 0.1667, acc, hn);
+                nb(vec2( 1.0, -1.0), 0.1667, acc, hn); nb(vec2(-1.0, -1.0), 0.1667, acc, hn);
+                float add = pourAdd();
+                acc += add * uSrcCol; hn += add;
+                hn = max(hn, 0.0);
+                if (gM0 < 0.5 || hn < 1e-4) { gl_FragColor = vec4(0.0); return; }
+                vec3 c = clamp(acc / hn, 0.0, 1.0);
+                gl_FragColor = vec4(c * hn, hn);
+            }`;
+        // yardımcı alan: r = yaş (sn), g = döküm tohumu (hücre kimliği), ba = akışla biriken yer değiştirme (m) → hücreler boyaya yapışık
+        const FLOW_T_FS = FLOW_COMMON + `
+            uniform sampler2D uT; uniform float uSeed;
+            vec4 gT0;
+            void nbT(vec2 o, float w, inout vec4 acc, inout float hn, inout vec2 vel){
+                vec4 sj; float f = flowFrom(o, w, sj);
+                vec4 tj = texture2D(uT, gUv + o * uTx);
+                acc += f > 0.0 ? f * tj : f * gT0;
+                hn += f; vel -= f * o;
+            }
+            void main(){
+                gUv = uRect.xy + vUv * uRect.zw;
+                vec4 s0 = texture2D(uS, gUv);
+                gM0 = texture2D(uM, gUv).r; gH0 = s0.a;
+                gT0 = texture2D(uT, gUv);
+                vec4 acc = gT0 * gH0; float hn = gH0; vec2 vel = vec2(0.0);
+                nbT(vec2( 1.0,  0.0), 0.6667, acc, hn, vel); nbT(vec2(-1.0,  0.0), 0.6667, acc, hn, vel);
+                nbT(vec2( 0.0,  1.0), 0.6667, acc, hn, vel); nbT(vec2( 0.0, -1.0), 0.6667, acc, hn, vel);
+                nbT(vec2( 1.0,  1.0), 0.1667, acc, hn, vel); nbT(vec2(-1.0,  1.0), 0.1667, acc, hn, vel);
+                nbT(vec2( 1.0, -1.0), 0.1667, acc, hn, vel); nbT(vec2(-1.0, -1.0), 0.1667, acc, hn, vel);
+                float add = pourAdd();
+                acc += add * vec4(0.0, uSeed, gT0.b, gT0.a); hn += add;
+                hn = max(hn, 0.0);
+                if (gM0 < 0.5 || hn < 1e-4) { gl_FragColor = vec4(0.0); return; }
+                vec4 t = acc / hn;
+                t.r = min(t.r + uDt, 120.0);
+                t.ba = clamp(t.ba + clamp(vel / max(gH0, 0.03) * uMeter, vec2(-0.5), vec2(0.5)), vec2(-60.0), vec2(60.0));
+                gl_FragColor = t;
+            }`;
+        const FLOW_COPY_FS = `uniform sampler2D uSrc; varying vec2 vUv; void main(){ gl_FragColor = texture2D(uSrc, vUv); }`;
+        const FLOW_MASK_VS = `uniform float uExt; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); gl_Position = vec4(w.x / uExt, w.z / uExt, 0.0, 1.0); }`;
+        const FLOW_MASK_FS = `uniform float uExt; uniform float uN;
+            ${GLSL_NOISE}
+            void main(){ vec2 wm = (gl_FragCoord.xy / uN - 0.5) * 2.0 * uExt; gl_FragColor = vec4(1.0, qn(wm * 0.16 + 3.7) * (0.7 + 0.3 * qn(wm * 0.6 + 9.1)), 0.0, 1.0); }`;
+        const FLOW_PT_VS = `attribute vec3 aCol; uniform float uExt; uniform float uSize; varying vec3 vCol; void main(){ vCol = aCol; gl_Position = vec4(position.x / uExt, position.z / uExt, 0.0, 1.0); gl_PointSize = uSize; }`;
+        const FLOW_PT_FS = `uniform sampler2D uM; uniform float uN; uniform float uH; uniform float uMode; varying vec3 vCol;
+            void main(){ vec2 d = gl_PointCoord - 0.5; if (dot(d, d) > 0.25) discard; if (texture2D(uM, gl_FragCoord.xy / uN).r < 0.5) discard;
+                gl_FragColor = uMode < 0.5 ? vec4(vCol * uH, uH) : vec4(40.0, fract(vCol.r * 7.13 + vCol.g * 13.7 + vCol.b * 3.1), 0.0, 0.0); }`;
+        // görüntü: ıslak akrilik. Renk = simülasyonun pigmenti; hücreler, dantel, damarlar, kalınlık, menisküs, ıslak parlaklık
+        const FLOW_VIEW_VS = `varying vec3 vW; varying vec3 vN; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; vN = normalize(mat3(modelMatrix) * normal); gl_Position = projectionMatrix * viewMatrix * w; }`;
+        const FLOW_VIEW_FS = `
+            uniform sampler2D uS; uniform sampler2D uT; uniform samplerCube uEnv; uniform float uExt; uniform float uTx; uniform float uTime;
+            uniform vec3 uSun; uniform vec3 uSunCol; uniform float uNight;
+            varying vec3 vW; varying vec3 vN;
+            ${GLSL_NOISE}
+            vec3 vor(vec2 p){
+                vec2 i = floor(p), f = fract(p); float d1 = 8.0, d2 = 8.0, id = 0.0;
+                for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+                    vec2 g = vec2(float(x), float(y));
+                    vec2 o = 0.5 + 0.42 * sin(6.2831 * vec2(qh(i + g), qh(i + g + 17.3)));
+                    float d = length(g + o - f);
+                    if (d < d1) { d2 = d1; d1 = d; id = qh(i + g + 5.7); } else if (d < d2) d2 = d;
+                }
+                return vec3(d1, d2 - d1, id);
+            }
+            vec3 pig(vec4 s, vec3 fb){ return s.a > 0.02 ? s.rgb / s.a : fb; }
+            void main(){
+                vec2 uv = vW.xz / (2.0 * uExt) + 0.5;
+                vec4 s = texture2D(uS, uv);
+                float h = s.a;
+                float eN = qn(vW.xz * 0.55) * 0.55 + qn(vW.xz * 1.9) * 0.3 + qn(vW.xz * 6.0) * 0.15;
+                float val = h - 0.035 + (eN - 0.5) * 0.03;
+                float fw = fwidth(val) + 1e-4;
+                float cov = smoothstep(-fw, fw, val);
+                if (cov < 0.01) discard;
+                vec3 col = pig(s, vec3(0.5));
+                float dist = length(vW - cameraPosition);
+                float detail = 1.0 - smoothstep(90.0, 300.0, dist);
+                float e = uTx * 1.5;
+                vec4 sx1 = texture2D(uS, uv + vec2(e, 0.0)), sx0 = texture2D(uS, uv - vec2(e, 0.0));
+                vec4 sz1 = texture2D(uS, uv + vec2(0.0, e)), sz0 = texture2D(uS, uv - vec2(0.0, e));
+                float g = length(pig(sx1, col) - pig(sx0, col)) + length(pig(sz1, col) - pig(sz0, col));
+                vec2 gh = vec2(sx1.a - sx0.a, sz1.a - sz0.a) / (4.0 * e * uExt);
+                vec4 T = texture2D(uT, uv);
+                float age = T.r, seed = T.g; vec2 disp = T.ba;
+                float hc = 0.0;
+                if (detail > 0.01) {
+                    // hücreler dünya koordinatında sabit (boyaya yapışık durur, kaymaz); akış yönü yalnız hafif bir uzamada kullanılır
+                    float dl = length(disp); vec2 dir = dl > 1e-3 ? disp / dl : vec2(1.0, 0.0);
+                    // organik hücre biçimi: Voronoi girişi yumuşak gürültüyle bükülür (yuvarlak 'kabarcık' değil, akrilik hücre)
+                    vec2 Q = vW.xz + (vec2(qn(vW.xz * 0.35), qn(vW.xz * 0.35 + 7.1)) - 0.5) * 1.8;
+                    float grow = 1.0 - exp(-age / 3.0);
+                    float dens = 0.16 + 0.6 * smoothstep(0.04, 0.35, g);
+                    // renk sınırlarında yumuşak mermer geçişi: komşu katmanın rengi ipeksi bantlar halinde içeri karışır (çizgi değil)
+                    float band = smoothstep(0.38, 0.62, qfbm(Q * 0.3 + seed * 3.0));
+                    vec3 side = pig(texture2D(uS, uv + vec2(-dir.y, dir.x) * uTx * 3.0), col);
+                    col = mix(col, side, band * 0.35 * smoothstep(0.03, 0.3, g) * detail);
+                    // büyük, seyrek hücreler
+                    vec3 v1 = vor(Q * 0.8 + seed * 13.0);
+                    float r1 = (0.16 + 0.3 * fract(v1.z * 7.13)) * grow;
+                    float on1 = step(1.0 - dens, v1.z);
+                    float aa1 = fwidth(v1.x) + 1e-3;
+                    float c1 = on1 * smoothstep(r1 + aa1, r1 - aa1, v1.x) * step(0.03, r1);
+                    float ring1 = on1 * smoothstep(0.03 + aa1, 0.0, abs(v1.x - r1)) * step(0.03, r1);
+                    vec2 off1 = (vec2(qh(vec2(v1.z, 3.1)), qh(vec2(v1.z, 9.7))) - 0.5) * uTx * 14.0;
+                    vec3 under1 = mix(pig(texture2D(uS, uv + off1), col), vec3(0.95, 0.93, 0.88), 0.22 * fract(v1.z * 3.7));
+                    vec3 lace1 = mix(col * 0.5, mix(col, vec3(0.96, 0.94, 0.89), 0.55), step(0.45, fract(v1.z * 5.3)));
+                    float inner = smoothstep(0.0, max(r1, 1e-3), v1.x);
+                    col = mix(col, mix(under1, col, inner * 0.35), c1 * detail);
+                    col = mix(col, lace1, ring1 * detail * 0.55);
+                    // küçük, yoğun hücreler (yalnız yakında)
+                    float near = 1.0 - smoothstep(30.0, 110.0, dist);
+                    if (near > 0.01) {
+                        vec3 v2 = vor(Q * 2.4 + seed * 7.0 + 3.1);
+                        float r2 = (0.1 + 0.22 * fract(v2.z * 5.71)) * grow;
+                        float on2 = step(1.0 - dens * 0.45, v2.z);
+                        float aa2 = fwidth(v2.x) + 1e-3;
+                        float c2 = on2 * smoothstep(r2 + aa2, r2 - aa2, v2.x) * step(0.03, r2);
+                        float ring2 = on2 * smoothstep(0.06 + aa2, 0.0, abs(v2.x - r2)) * step(0.03, r2);
+                        vec2 off2 = (vec2(qh(vec2(v2.z, 1.3)), qh(vec2(v2.z, 4.9))) - 0.5) * uTx * 8.0;
+                        vec3 under2 = mix(pig(texture2D(uS, uv + off2), col), vec3(0.95, 0.93, 0.88), 0.3 * fract(v2.z * 2.3));
+                        col = mix(col, under2, c2 * near * (1.0 - c1));
+                        col = mix(col, col * 0.55, ring2 * near * 0.5 * (1.0 - c1));
+                        hc += (ring2 * 0.4 - c2 * 0.15) * near;
+                    }
+                    hc += ring1 * 0.6 - c1 * 0.25;
+                    hc *= 0.004 * detail;
+                }
+                // normal: boya yüzeyinin eğimi + hücre kraterleri (yüzey gradyanı yöntemi)
+                vec3 Nb = normalize(vN);
+                vec3 dpdx = dFdx(vW), dpdy = dFdy(vW);
+                vec3 r1v = cross(dpdy, Nb), r2v = cross(Nb, dpdx);
+                float det = dot(dpdx, r1v);
+                vec3 sg = sign(det) * (dFdx(hc) * r1v + dFdy(hc) * r2v);
+                vec3 N = normalize(abs(det) * Nb - sg + 1e-6 * Nb);
+                N = normalize(N + vec3(-gh.x * 0.5, 0.0, -gh.y * 0.5));
+                vec3 V = normalize(cameraPosition - vW);
+                float ndl = max(dot(N, uSun), 0.0);
+                // kalınlık ve kenar: ince kenar hafif açık ve yarı saydam, cephede pigment birikimi (koyulaşan ince halka) + menisküs
+                float thick = smoothstep(0.03, 0.45, h);
+                float rim = 1.0 - smoothstep(0.0, 0.05, val);
+                vec3 base = col * mix(1.06, 0.94, thick);
+                base *= 1.0 - 0.3 * rim;
+                base *= (0.8 + 0.2 * ndl) * mix(1.0, 0.55, uNight);
+                float ndv = max(dot(N, V), 0.0);
+                float F = 0.04 + 0.96 * pow(1.0 - ndv, 5.0);
+                vec3 env = textureCube(uEnv, reflect(-V, N)).rgb;
+                vec3 Hh = normalize(uSun + V);
+                float nh = max(dot(N, Hh), 0.0);
+                float spec = (pow(nh, 900.0) * 1.3 + pow(nh, 70.0) * 0.05) * (1.0 - uNight) * step(0.0, uSun.y);
+                float men = smoothstep(0.0, 0.02, val) * (1.0 - smoothstep(0.02, 0.07, val));
+                vec3 outc = base * (1.0 - F * 0.3) + env * F * 0.32 + uSunCol * spec + vec3(1.0) * men * 0.1 * (1.0 - 0.7 * uNight);
+                gl_FragColor = vec4(min(outc, vec3(1.0)), cov);
+            }`;
+        const FLOW_STREAM_VS = `uniform float uTime; uniform float uLen; uniform float uR; varying vec3 vN; varying vec3 vW; varying float vY;
+            void main(){
+                vec3 p = position; float y = p.y;
+                float r = uR * (0.5 + 0.5 * y) * (1.0 + 0.16 * sin(uTime * 9.0 + y * 14.0));
+                vec3 q = vec3(p.x * r, y * uLen, p.z * r);
+                q.x += sin(uTime * 3.1 + y * 5.0) * 0.035 * (1.0 - y); q.z += cos(uTime * 2.7 + y * 4.0) * 0.035 * (1.0 - y);
+                vec4 w = modelMatrix * vec4(q, 1.0); vW = w.xyz; vN = normalize(mat3(modelMatrix) * vec3(p.x, 0.0, p.z)); vY = y;
+                gl_Position = projectionMatrix * viewMatrix * w;
+            }`;
+        const FLOW_STREAM_FS = `uniform vec3 uCol; uniform vec3 uSun; uniform vec3 uSunCol; uniform float uNight; uniform samplerCube uEnv; varying vec3 vN; varying vec3 vW; varying float vY;
+            void main(){
+                vec3 N = normalize(vN), V = normalize(cameraPosition - vW);
+                float ndv = max(dot(N, V), 0.0), F = 0.04 + 0.96 * pow(1.0 - ndv, 5.0);
+                vec3 env = textureCube(uEnv, reflect(-V, N)).rgb;
+                float spec = pow(max(dot(N, normalize(uSun + V)), 0.0), 220.0) * 1.6 * (1.0 - uNight);
+                vec3 c = uCol * (0.78 + 0.22 * max(dot(N, uSun), 0.0)) * mix(1.0, 0.55, uNight);
+                gl_FragColor = vec4(min(c * (1.0 - F * 0.5) + env * F * 0.7 + uSunCol * spec, vec3(1.0)), 1.0);
+            }`;
+        function mergePaintGeos(geos) {
+            const parts = geos.map(g0 => { const g = g0.index ? g0.toNonIndexed() : g0; g.computeVertexNormals(); return g; });
+            const total = parts.reduce((n, g) => n + g.attributes.position.array.length, 0);
+            const P = new Float32Array(total), Nn = new Float32Array(total); let off = 0;
+            parts.forEach(g => { P.set(g.attributes.position.array, off); Nn.set(g.attributes.normal.array, off); off += g.attributes.position.array.length; });
+            const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(P, 3)); g.setAttribute('normal', new THREE.BufferAttribute(Nn, 3));
+            return g;
+        }
+        const FLOW = {
+            ok: false, EXT: 615, N: 0, R: 0, DT: 1 / 90, MAXS: IS_MOBILE ? 2 : 3, K: 216, TAU: 0.0125, RATE: 3.7, RAD: 2.6, HSET: 0.28,
+            key: 'sucity.flow.v1', last: null, log: [], logD: 0, changed: false, saveT: 0, acc: 0, activeUntil: -1, lastStrokeAt: -1,
+            cur: null, step: null, col: [0.6, 0.6, 0.6], colShow: new THREE.Color(0.6, 0.6, 0.6), colD: 0, colLen: 3, colHex: '#999999', seed: 0.37, pi: 0,
+            grid: null, G: 256, rt: [], stream: null,
+            supported() {
+                if (!renderer || SAFE_MODE) return false;
+                const ex = renderer.extensions;
+                if (renderer.capabilities.isWebGL2) return ex.has('EXT_color_buffer_float') || ex.has('EXT_color_buffer_half_float');
+                return ex.has('OES_texture_half_float') && ex.has('OES_texture_half_float_linear') && (ex.has('EXT_color_buffer_half_float') || ex.has('WEBGL_color_buffer_float'));
+            },
+            mkRT(n, filter) {
+                const r = new THREE.WebGLRenderTarget(n, n, { type: THREE.HalfFloatType, format: THREE.RGBAFormat, minFilter: filter, magFilter: filter, depthBuffer: false, stencilBuffer: false, generateMipmaps: false });
+                r.texture.generateMipmaps = false; r.texture.wrapS = r.texture.wrapT = THREE.ClampToEdgeWrapping; this.rt.push(r); return r;
+            },
+            complete(r) {
+                const gl = renderer.getContext(); renderer.setRenderTarget(r);
+                const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE; renderer.setRenderTarget(null); return ok;
+            },
+            clearRT(r) {
+                const cc = renderer.getClearColor(new THREE.Color()), ca = renderer.getClearAlpha();
+                r.viewport.set(0, 0, r.width, r.height); renderer.setRenderTarget(r); renderer.setClearColor(0x000000, 0); renderer.clear(true, false, false);
+                renderer.setRenderTarget(null); renderer.setClearColor(cc, ca);
+            },
+            init(geos) {
+                this.N = IS_MOBILE ? (Q.tier >= 1 ? 1024 : 768) : (Q.tier >= 2 ? 2048 : 1536);
+                this.R = IS_MOBILE ? 256 : 512;
+                this.meter = 2 * this.EXT / this.N;
+                this.SA = this.mkRT(this.N, THREE.LinearFilter); this.TA = this.mkRT(this.N, THREE.LinearFilter);
+                this.SB = this.mkRT(this.R, THREE.NearestFilter); this.TB = this.mkRT(this.R, THREE.NearestFilter);
+                this.M = new THREE.WebGLRenderTarget(this.N, this.N, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false, stencilBuffer: false, generateMipmaps: false }); this.rt.push(this.M);
+                if (![this.SA, this.TA, this.SB, this.TB].every(r => this.complete(r))) throw new Error('flow: float render targets unsupported');
+                this.rt.forEach(r => this.clearRT(r));
+                // yol maskesi: boyanabilir yüzeyin (cam yollar, kavşaklar, meydan) tepeden görünüşü
+                const geo = mergePaintGeos(geos);
+                const maskMat = new THREE.ShaderMaterial({ uniforms: { uExt: { value: this.EXT }, uN: { value: this.N } }, vertexShader: FLOW_MASK_VS, fragmentShader: FLOW_MASK_FS, side: THREE.DoubleSide, depthTest: false, depthWrite: false });
+                const ms = new THREE.Scene(), mm = new THREE.Mesh(geo, maskMat); mm.frustumCulled = false; ms.add(mm);
+                this.cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+                this.render(ms, this.M, 0, 0, this.N);
+                maskMat.dispose();
+                // geçiş malzemeleri
+                const U0 = () => ({
+                    uS: { value: this.SA.texture }, uM: { value: this.M.texture }, uRect: { value: new THREE.Vector4() }, uTx: { value: 1 / this.N }, uMeter: { value: this.meter },
+                    uDt: { value: this.DT }, uK: { value: this.K }, uTau: { value: this.TAU }, uExt: { value: this.EXT }, uSrcA: { value: new THREE.Vector4(0, 0, 0.001, 0) }, uSrcB: { value: new THREE.Vector2() }, uTime: { value: 0 }
+                });
+                const mk = (fs, u) => new THREE.ShaderMaterial({ uniforms: u, vertexShader: FLOW_QUAD_VS, fragmentShader: fs, depthTest: false, depthWrite: false, blending: THREE.NoBlending });
+                this.matS = mk(FLOW_S_FS, Object.assign(U0(), { uSrcCol: { value: new THREE.Vector3(0.6, 0.6, 0.6) } }));
+                this.matT = mk(FLOW_T_FS, Object.assign(U0(), { uT: { value: this.TA.texture }, uSeed: { value: 0.37 } }));
+                this.matC = mk(FLOW_COPY_FS, { uSrc: { value: null } });
+                this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.matS); this.quad.frustumCulled = false;
+                this.qs = new THREE.Scene(); this.qs.add(this.quad);
+                // görünen boya
+                this.mat = new THREE.ShaderMaterial({
+                    uniforms: { uS: { value: this.SA.texture }, uT: { value: this.TA.texture }, uEnv: { value: LIVE_ENV.front ? LIVE_ENV.front.texture : null }, uExt: { value: this.EXT }, uTx: { value: 1 / this.N }, uTime: U.time, uSun: { value: LIGHT }, uSunCol: { value: SUN_COL }, uNight: U.night },
+                    vertexShader: FLOW_VIEW_VS, fragmentShader: FLOW_VIEW_FS, extensions: { derivatives: true }, transparent: true, depthWrite: true, blending: THREE.NormalBlending,
+                    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4
+                });
+                this.mesh = new THREE.Mesh(geo, this.mat); this.mesh.renderOrder = 7; this.mesh.frustumCulled = false; this.mesh.matrixAutoUpdate = false;
+                scene.add(this.mesh); hiddenInMirror.push(this.mesh);
+                this.grid = new Uint8Array(this.G * this.G);
+                try { localStorage.removeItem('sucity.paint.v6'); localStorage.removeItem('sucity.paint.v5'); } catch (e) {}
+                this.ok = true;
+                this.restore();
+            },
+            // tam ekran (veya pencere) geçişi: hedefin yalnız verilen kare bölgesine çizer, hiçbir şeyi silmez
+            render(sc, target, x, y, size) {
+                const prevT = renderer.getRenderTarget(), prevA = renderer.autoClear;
+                renderer.autoClear = false;
+                target.viewport.set(x, y, size, size); target.scissorTest = false;
+                renderer.setRenderTarget(target); renderer.render(sc, this.cam);
+                target.viewport.set(0, 0, target.width, target.height);
+                renderer.setRenderTarget(prevT); renderer.autoClear = prevA;
+            },
+            mark(x, z) {
+                const G = this.G, c = (2 * this.EXT) / G, r = Math.ceil((ROAD_HALF + 1.5) / c), gx = Math.floor((x / (2 * this.EXT) + 0.5) * G), gz = Math.floor((z / (2 * this.EXT) + 0.5) * G);
+                for (let j = -r; j <= r; j++) for (let i = -r; i <= r; i++) { const X = gx + i, Z = gz + j; if (X >= 0 && Z >= 0 && X < G && Z < G && i * i + j * j <= r * r) this.grid[Z * G + X] = 1; }
+            },
+            hexRGB(h) { return [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255]; },
+            // o anda en yakın binaların eser paletleri (uzaklıkla ağırlıklı); her renk değişiminde biri seçilir
+            nextColor(x, z) {
+                const near = [];
+                for (const e of BUILDINGS) { const dx = e.mesh.position.x - x, dz = e.mesh.position.z - z, d = dx * dx + dz * dz; if (d < 75 * 75) near.push([d, e]); }
+                near.sort((a, b) => a[0] - b[0]);
+                const pool = [];
+                near.slice(0, 3).forEach(([d, e], i) => { const p = PAINT_C.palOf(e); if (p) p.forEach(h => pool.push({ h, w: (3 - i) / (1 + Math.sqrt(d) * 0.03) })); });
+                if (!pool.length) PAINT_C.FALLBACK.forEach(h => pool.push({ h, w: 1 }));
+                let tot = 0; pool.forEach(p => tot += p.w);
+                let pick = pool[0].h;
+                for (let tries = 0; tries < 4; tries++) {
+                    let r = Math.random() * tot; for (const p of pool) { r -= p.w; if (r <= 0) { pick = p.h; break; } }
+                    if (pick !== this.colHex || pool.length < 2) break;
+                }
+                this.colHex = pick; this.col = this.hexRGB(pick); this.seed = Math.random();
+                this.colLen = 2.2 + Math.random() * 3.6;
+            },
+            stroke(x, z) {
+                if (!this.ok) return;
+                const now = performance.now() / 1000;
+                if (!this.last || Math.hypot(x - this.last.x, z - this.last.z) > 30) {
+                    this.last = { x, z }; this.cur = { x, z }; this.step = { x, z }; this.nextColor(x, z); this.lastStrokeAt = now; return;
+                }
+                const d = Math.hypot(x - this.last.x, z - this.last.z);
+                this.colD += d; this.logD += d;
+                if (this.colD >= this.colLen) { this.colD = 0; this.nextColor(x, z); }
+                if (this.logD >= 1.6) { this.logD = 0; this.log.push([Math.round(x * 10) / 10, Math.round(z * 10) / 10, this.colHex]); if (this.log.length > 6000) this.log.splice(0, this.log.length - 6000); this.mark(x, z); this.changed = true; }
+                this.last = { x, z }; this.cur = { x, z }; if (!this.step) this.step = { x, z };
+                this.lastStrokeAt = now;
+            },
+            update(dt) {
+                if (!this.ok) return;
+                if (LIVE_ENV.front) this.mat.uniforms.uEnv.value = LIVE_ENV.front.texture;
+                const now = performance.now() / 1000, since = now - this.lastStrokeAt;
+                const rateK = this.lastStrokeAt < 0 ? 0 : since < 0.12 ? 1 : Math.exp(-(since - 0.12) / 0.3);
+                const pouring = rateK > 0.02 && !!this.cur;
+                if (pouring) this.activeUntil = now + 24;
+                this.updateStream(pouring, rateK, dt);
+                this.saveT += dt; if (this.changed && this.saveT > 6) this.save();
+                if (now > this.activeUntil || !this.cur) { this.acc = 0; return; }
+                this.acc = Math.min(this.acc + Math.min(dt, 0.1), this.DT * this.MAXS);
+                let n = Math.floor(this.acc / this.DT); if (n < 1) return;
+                this.acc -= n * this.DT;
+                const N = this.N, R = this.R, c = this.cur;
+                const x0 = Math.max(0, Math.min(N - R, Math.round((c.x / (2 * this.EXT) + 0.5) * N - R / 2)));
+                const y0 = Math.max(0, Math.min(N - R, Math.round((c.z / (2 * this.EXT) + 0.5) * N - R / 2)));
+                const rect = [x0 / N, y0 / N, R / N, R / N];
+                const toUV = v => v / (2 * this.EXT) + 0.5;
+                const t = U.time.value;
+                for (let k = 0; k < n; k++) {
+                    const s0 = this.step || c, f = 1 / (n - k), bx = s0.x + (c.x - s0.x) * f, bz = s0.z + (c.z - s0.z) * f;
+                    [this.matS, this.matT].forEach(m => {
+                        const u = m.uniforms; u.uRect.value.set(rect[0], rect[1], rect[2], rect[3]); u.uTime.value = t;
+                        u.uSrcA.value.set(toUV(s0.x), toUV(s0.z), this.RAD / (2 * this.EXT), pouring ? this.RATE * rateK : 0); u.uSrcB.value.set(toUV(bx), toUV(bz));
+                    });
+                    this.matS.uniforms.uSrcCol.value.set(this.col[0], this.col[1], this.col[2]);
+                    this.matT.uniforms.uSeed.value = this.seed;
+                    this.quad.material = this.matS; this.render(this.qs, this.SB, 0, 0, R);
+                    this.quad.material = this.matT; this.render(this.qs, this.TB, 0, 0, R);
+                    this.quad.material = this.matC;
+                    this.matC.uniforms.uSrc.value = this.SB.texture; this.render(this.qs, this.SA, x0, y0, R);
+                    this.matC.uniforms.uSrc.value = this.TB.texture; this.render(this.qs, this.TA, x0, y0, R);
+                    this.step = { x: bx, z: bz };
+                }
+            },
+            // ruhtan yola inen ince, parlak boya akıntısı (yalnız dökerken)
+            updateStream(pouring, k, dt) {
+                if (!car) return;
+                if (!this.stream) {
+                    const g = new THREE.CylinderGeometry(1, 1, 1, 14, 10, true); g.translate(0, 0.5, 0);
+                    const m = new THREE.ShaderMaterial({ uniforms: { uTime: U.time, uLen: { value: 1.35 }, uR: { value: 0.1 }, uCol: { value: this.colShow }, uSun: { value: LIGHT }, uSunCol: { value: SUN_COL }, uNight: U.night, uEnv: { value: LIVE_ENV.front ? LIVE_ENV.front.texture : null } }, vertexShader: FLOW_STREAM_VS, fragmentShader: FLOW_STREAM_FS });
+                    this.stream = new THREE.Mesh(g, m); this.stream.frustumCulled = false; this.stream.position.y = 0.02; this.stream.renderOrder = 8;
+                    car.add(this.stream); hiddenInMirror.push(this.stream);
+                }
+                const s = this.stream, u = s.material.uniforms;
+                if (LIVE_ENV.front) u.uEnv.value = LIVE_ENV.front.texture;
+                this.colShow.r += (this.col[0] - this.colShow.r) * Math.min(1, dt * 10); this.colShow.g += (this.col[1] - this.colShow.g) * Math.min(1, dt * 10); this.colShow.b += (this.col[2] - this.colShow.b) * Math.min(1, dt * 10);
+                u.uR.value = 0.1 * Math.min(1, k * 1.2);
+                s.visible = pouring && cameraMode !== 1 && !!(spirit && spirit.group.visible);
+                s.rotation.x = -Math.max(-0.35, Math.min(0.35, MOVE.speed * 0.025));
+            },
+            restore() {
+                let arr = null; try { arr = JSON.parse(localStorage.getItem(this.key) || 'null'); } catch (e) {}
+                if (!Array.isArray(arr) || !arr.length) return;
+                arr = arr.filter(a => Array.isArray(a) && a.length === 3 && isFinite(a[0]) && isFinite(a[1]) && /^#[0-9a-f]{6}$/i.test(a[2]));
+                if (!arr.length) return;
+                this.log = arr;
+                const n = arr.length, P = new Float32Array(n * 3), C = new Float32Array(n * 3);
+                arr.forEach((a, i) => { P[i * 3] = a[0]; P[i * 3 + 1] = 0; P[i * 3 + 2] = a[1]; const c = this.hexRGB(a[2]); C[i * 3] = c[0]; C[i * 3 + 1] = c[1]; C[i * 3 + 2] = c[2]; this.mark(a[0], a[1]); });
+                const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(P, 3)); g.setAttribute('aCol', new THREE.BufferAttribute(C, 3));
+                const maxPt = renderer.getContext().getParameter(renderer.getContext().ALIASED_POINT_SIZE_RANGE);
+                const size = Math.min(maxPt ? maxPt[1] : 64, (2 * ROAD_HALF * 1.25) / this.meter);
+                const m = new THREE.ShaderMaterial({ uniforms: { uExt: { value: this.EXT }, uSize: { value: size }, uM: { value: this.M.texture }, uN: { value: this.N }, uH: { value: this.HSET }, uMode: { value: 0 } }, vertexShader: FLOW_PT_VS, fragmentShader: FLOW_PT_FS, depthTest: false, depthWrite: false, blending: THREE.NoBlending });
+                const pts = new THREE.Points(g, m); pts.frustumCulled = false; const sc = new THREE.Scene(); sc.add(pts);
+                this.render(sc, this.SA, 0, 0, this.N);
+                m.uniforms.uMode.value = 1; this.render(sc, this.TA, 0, 0, this.N);
+                g.dispose(); m.dispose();
+            },
+            save() { this.saveT = 0; this.changed = false; try { localStorage.setItem(this.key, JSON.stringify(this.log)); } catch (e) {} },
+            clear() {
+                if (!this.ok) return;
+                [this.SA, this.TA, this.SB, this.TB].forEach(r => this.clearRT(r));
+                this.log = []; this.grid.fill(0); this.last = null; this.cur = null; this.step = null; this.activeUntil = -1; this.lastStrokeAt = -1; this.changed = false;
+                try { localStorage.removeItem(this.key); } catch (e) {}
+            },
+            at(x, z) {
+                if (!this.grid) return 0;
+                const G = this.G, X = Math.floor((x / (2 * this.EXT) + 0.5) * G), Z = Math.floor((z / (2 * this.EXT) + 0.5) * G);
+                if (X < 0 || Z < 0 || X >= G || Z >= G) return 0;
+                return this.grid[Z * G + X];
+            },
+            coverage() { let hit = 0, n = 0; for (let i = 0; i < roadPts.length; i += 3) { n++; if (this.at(roadPts[i].x, roadPts[i].z) > 0.5) hit++; } return n ? hit / n : 0; },
+            dispose() { this.rt.forEach(r => { try { r.dispose(); } catch (e) {} }); this.rt = []; if (this.mesh) { scene.remove(this.mesh); this.mesh = null; } this.ok = false; }
+        };
+        // Dış dünyaya tek yüz: GPU akışı destekleniyorsa o, değilse (eski cihaz / güvenli mod) önceki tuval boyası çalışır.
+        const PAINT = {
+            geos: [], gpu: null, last: null,
+            init() {
+                PAINT_C.geos = this.geos;
+                let ok = false; try { ok = FLOW.supported(); } catch (e) { ok = false; }
+                if (ok) { try { FLOW.init(this.geos); this.gpu = FLOW; } catch (e) { console.warn('Akış: GPU simülasyonu kullanılamadı, tuval boyasına geçildi.', e); try { renderer.setRenderTarget(null); } catch (e2) {} FLOW.dispose(); this.gpu = null; } }
+                if (!this.gpu) PAINT_C.init();
+            },
+            impl() { return this.gpu || PAINT_C; },
+            stroke(x, z) { const T = this.impl(); T.last = this.last; T.stroke(x, z); this.last = T.last; },
+            update(dt) { this.impl().update(dt); },
+            clear() { this.impl().clear(); this.last = null; },
+            at(x, z) { return this.impl().at(x, z); },
+            coverage() { return this.impl().coverage(); }
         };
 
         // ===================== REHBERLİ KEŞİF ROTASI =====================
@@ -2750,7 +3226,7 @@ canvas{touch-action:none}
         // Tüm şehir için tek bir örneklenmiş (instanced) çizim çağrısı.
         function createShoreFoam() {
             if (SAFE_MODE || !BUILDINGS.length) return;
-            const M = 3.6, N = BUILDINGS.length, g = new THREE.PlaneGeometry(1, 1); g.rotateX(-Math.PI / 2);
+            const M = 3.6, N = BUILDINGS.length, g = new THREE.PlaneGeometry(1, 1, 10, 10); g.rotateX(-Math.PI / 2);
             const ig = g;
             const half = new Float32Array(N * 2), round = new Float32Array(N), ext = new Float32Array(N * 2);
             BUILDINGS.forEach((e, i) => {
@@ -2759,11 +3235,13 @@ canvas{touch-action:none}
             });
             ig.setAttribute('aHalf', new THREE.InstancedBufferAttribute(half, 2)); ig.setAttribute('aRound', new THREE.InstancedBufferAttribute(round, 1)); ig.setAttribute('aExt', new THREE.InstancedBufferAttribute(ext, 2));
             const mat = new THREE.ShaderMaterial({
-                uniforms: { uTime: U.time, uFoam: ocean ? ocean.material.uniforms.uFoamCol : { value: new THREE.Color(0.8, 0.82, 0.85) }, uNight: U.night, uM: { value: M } },
-                vertexShader: `attribute vec2 aHalf; attribute float aRound; attribute vec2 aExt; varying vec2 vL; varying vec2 vHalf; varying float vRound; varying vec3 vW; varying float vPh;
+                uniforms: { uTime: U.time, uWave: SEA_WAVE, uFoam: ocean ? ocean.material.uniforms.uFoamCol : { value: new THREE.Color(0.8, 0.82, 0.85) }, uNight: U.night, uM: { value: M } },
+                vertexShader: `uniform float uTime; uniform float uWave; attribute vec2 aHalf; attribute float aRound; attribute vec2 aExt; varying vec2 vL; varying vec2 vHalf; varying float vRound; varying vec3 vW; varying float vPh;
+                    ${GLSL_SEA}
                     void main(){
                         vec3 p = vec3(position.x * aExt.x, 0.0, position.z * aExt.y);
                         vec4 w = modelMatrix * instanceMatrix * vec4(p, 1.0);
+                        w.y = ${WATER_Y.toFixed(2)} + seaH(w.xz, uTime, uWave) + 0.09; // v6 · köpük dalganın üstünde: suyla kesişip titremez
                         vL = p.xz; vHalf = aHalf; vRound = aRound; vW = w.xyz; vPh = fract(sin(dot(instanceMatrix[3].xz, vec2(12.9, 78.2))) * 43758.5) * 6.2831;
                         gl_Position = projectionMatrix * viewMatrix * w;
                     }`,
@@ -2785,7 +3263,7 @@ canvas{touch-action:none}
                         gl_FragColor = vec4(uFoam * (1.0 + 0.15 * contact), a * (0.85 - 0.35 * uNight));
                         #include <encodings_fragment>
                     }`,
-                transparent: true, depthWrite: false
+                transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8
             });
             const im = new THREE.InstancedMesh(ig, mat, N);
             BUILDINGS.forEach((e, i) => { dummy.position.set(e.mesh.position.x, WATER_Y + 0.06, e.mesh.position.z); dummy.rotation.set(0, e.mesh.rotation.y, 0); dummy.scale.set(1, 1, 1); dummy.updateMatrix(); im.setMatrixAt(i, dummy.matrix); });
@@ -2838,7 +3316,7 @@ canvas{touch-action:none}
                     uMirror: { value: mirror.rt.texture }, uNormal: { value: makeWaterNormals() },
                     uRefrTex: { value: null }, uDepth: { value: null }, uRefr: { value: refr.on ? 1 : 0 },
                     uRes: { value: new THREE.Vector2(1, 1) }, uNear: { value: 1 }, uFar: { value: 16000 },
-                    uTexMat: { value: mirror.texMat }, uTime: U.time, uNight: U.night, uWave: { value: 1.0 },
+                    uTexMat: { value: mirror.texMat }, uTime: U.time, uNight: U.night, uWave: SEA_WAVE,
                     uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uSunCol: { value: new THREE.Color(1, 0.95, 0.85) }, uSunVis: { value: 1 },
                     uDeep: { value: new THREE.Color(0.01, 0.085, 0.19) }, uShallow: { value: new THREE.Color(0.03, 0.29, 0.34) },
                     uScatter: { value: new THREE.Color(0.05, 0.4, 0.35) }, uFoamCol: { value: new THREE.Color(0.8, 0.82, 0.85) },
@@ -3070,9 +3548,11 @@ canvas{touch-action:none}
         function waveAt(x, z, t, amp0) {
             const r = Math.hypot(x, z), cd = camera ? Math.hypot(x - camera.position.x, z - camera.position.z) : 0;
             const ss = (a, b, v) => { const q = Math.min(1, Math.max(0, (v - a) / (b - a))); return q * q * (3 - 2 * q); };
-            const amp = (amp0 === undefined ? 1 : amp0) * (0.22 + 0.78 * ss(610, 1150, r)) * (1 - ss(1600, 5200, cd));
+            const amp = (amp0 === undefined ? 1 : amp0) * SEA_WAVE.value * (0.22 + 0.78 * ss(610, 1150, r)) * (1 - ss(1600, 5200, cd));
+            // v6 · GPU okyanusuyla aynı yerel sönümleme: mumlar, tekneler ve tabaklar görünen dalganın üstünde kalır (içinden geçip titremez)
+            const sp = Math.max(1.1 + 0.034 * cd, 6.2832 * cd / SEA_SEG);
             let y = 0, nx = 0, nz = 0, ny = 1;
-            for (const w of WAVES) { const A = w.A * amp, f = w.k * (w.dx * x + w.dz * z - w.c * t), cf = Math.cos(f), sf = Math.sin(f); y += A * sf; nx -= w.dx * w.k * A * cf; nz -= w.dz * w.k * A * cf; ny -= w.Q * w.k * A * sf; }
+            for (const w of WAVES) { const L = 2 * Math.PI / w.k, A = w.A * amp * ss(3 * sp, 5.5 * sp, L), f = w.k * (w.dx * x + w.dz * z - w.c * t), cf = Math.cos(f), sf = Math.sin(f); y += A * sf; nx -= w.dx * w.k * A * cf; nz -= w.dz * w.k * A * cf; ny -= w.Q * w.k * A * sf; }
             const l = Math.hypot(nx, ny, nz) || 1; WAVE_OUT.y = y; WAVE_OUT.nx = nx / l; WAVE_OUT.ny = ny / l; WAVE_OUT.nz = nz / l; return WAVE_OUT;
         }
         const _wq = new THREE.Quaternion(), _wq2 = new THREE.Quaternion(), _wn = new THREE.Vector3(), _wup = new THREE.Vector3(0, 1, 0);
@@ -3503,16 +3983,25 @@ canvas{touch-action:none}
             if (rs) { car.position.set(rs.x, DECK + 0.45, rs.z); car.rotation.y = rs.ry; if (isFinite(rs.hour)) TOD.hour = rs.hour; INTRO.on = false; camera.position.set(rs.x, DECK + 8, rs.z + 14); }
             spirit = { group: new THREE.Group(), model: null, mixer: null, trail: [], opacity: 1 };
             car.add(spirit.group);
-            const shellMat = new THREE.ShaderMaterial({ uniforms: { uTime: U.time, uOpacity: { value: 0.9 } }, vertexShader: WISP_VS, fragmentShader: WISP_FS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+            const shellMat = new THREE.ShaderMaterial({ uniforms: { uTime: U.time, uOpacity: { value: 1.0 } }, vertexShader: WISP_VS, fragmentShader: WISP_FS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
             const shell = new THREE.Mesh(new THREE.SphereGeometry(0.85, 40, 24), shellMat); shell.scale.set(1, 1.35, 1);
             const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
             const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.25, 'rgba(200,232,255,0.55)'); gr.addColorStop(1, 'rgba(160,210,255,0)');
             g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
             const core = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
-            core.scale.set(2.6, 2.6, 1);
+            core.scale.set(3.0, 3.0, 1);
+            // v6 · DAHA BELİRGİN RUH: parlak gökyüzü ve açık renkli eserler önünde de okunsun diye arkasında ince, koyu-lacivert bir
+            // kontur halesi (normal karışım; ışık saçmaz, çevreyi aydınlatmaz) + daha dolgun çekirdek ve hale.
+            const ec = document.createElement('canvas'); ec.width = ec.height = 128; const eg = ec.getContext('2d');
+            const egr = eg.createRadialGradient(64, 64, 0, 64, 64, 64);
+            egr.addColorStop(0, 'rgba(8,22,48,0)'); egr.addColorStop(0.34, 'rgba(8,22,48,0)'); egr.addColorStop(0.47, 'rgba(8,22,48,0.42)'); egr.addColorStop(0.62, 'rgba(8,22,48,0.16)'); egr.addColorStop(1, 'rgba(8,22,48,0)');
+            eg.fillStyle = egr; eg.fillRect(0, 0, 128, 128);
+            const edgeMap = new THREE.CanvasTexture(ec); edgeMap.encoding = THREE.sRGBEncoding;
+            const edge = new THREE.Sprite(new THREE.SpriteMaterial({ map: edgeMap, transparent: true, opacity: 0.85, depthWrite: false, blending: THREE.NormalBlending, toneMapped: false }));
+            edge.scale.set(3.9, 3.9, 1); edge.renderOrder = 28;
             // daha belirgin: geniş, nefes alan bir ışık halesi ve yolda ruhun altında yumuşak bir ışık havuzu
             const aura = new THREE.Sprite(new THREE.SpriteMaterial({ map: core.material.map, color: 0x9fd4ff, transparent: true, opacity: 0.45, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
-            aura.scale.set(4.2, 4.2, 1);
+            aura.scale.set(4.8, 4.8, 1);
             // yerde net bir konum halkası ve gidiş yönünü gösteren ok: kalabalıkta, uzaktan ve kuş bakışında ruhu takip etmek kolaylaşır
             const pc = document.createElement('canvas'); pc.width = pc.height = 256; const pg = pc.getContext('2d');
             const pgr = pg.createRadialGradient(128, 128, 0, 128, 128, 120); pgr.addColorStop(0, 'rgba(190,228,255,0.55)'); pgr.addColorStop(0.45, 'rgba(160,210,255,0.18)'); pgr.addColorStop(1, 'rgba(160,210,255,0)');
@@ -3524,10 +4013,10 @@ canvas{touch-action:none}
             // v4 · ruh çevresine ışık saçmaz: yerdeki konum işareti ışık değil, normal karışımlı sade bir işarettir ve yalnız kuş bakışında görünür
             const pool = new THREE.Mesh(new THREE.PlaneGeometry(7, 7).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: poolMap, color: 0xffffff, transparent: true, opacity: 0.75, depthWrite: false, blending: THREE.NormalBlending, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -10, polygonOffsetUnits: -20 }));
             pool.renderOrder = 9; car.add(pool); pool.position.y = -0.1;
-            spirit.shell = shell; spirit.core = core; spirit.aura = aura; spirit.pool = pool;
+            spirit.shell = shell; spirit.core = core; spirit.aura = aura; spirit.pool = pool; spirit.edge = edge;
             // cam yollar şeffaf ve renderOrder 6 ile çizilir; ruh ondan SONRA çizilmezse camın altında kalmış gibi görünür
             shell.renderOrder = 30; core.renderOrder = 31; aura.renderOrder = 29; pool.renderOrder = 28;
-            spirit.group.add(shell, core, aura);
+            spirit.group.add(edge, shell, core, aura);
             const N = 36, pos = new Float32Array(N * 3), sz = new Float32Array(N), ph = new Float32Array(N);
             for (let i = 0; i < N; i++) { sz[i] = 2.6 * (1 - i / N) + 0.4; ph[i] = i / N; }
             const tg = new THREE.BufferGeometry();
@@ -3550,9 +4039,9 @@ canvas{touch-action:none}
             const firstPerson = cameraMode === 1 && !(window.SU && SU.ready && SU.isOverriding && SU.isOverriding());
             g.visible = !firstPerson; if (spirit.pool) spirit.pool.visible = cameraMode === 2 && !firstPerson;
             // uzaktan / kuş bakışında da kaybolmasın: ekrandaki boyutu en az belli bir değerde tutulur
-            const cd = camera ? camera.position.distanceTo(car.position) : 10, sc = Math.max(1, cd / 38);
+            const cd = camera ? camera.position.distanceTo(car.position) : 10, sc = Math.max(1, cd / 30);
             g.scale.setScalar(sc); if (spirit.pool) spirit.pool.scale.setScalar(Math.max(1, sc * 0.8));
-            if (spirit.aura) spirit.aura.material.opacity = 0.2 + 0.04 * Math.sin(t * 1.4);
+            if (spirit.aura) spirit.aura.material.opacity = 0.34 + 0.06 * Math.sin(t * 1.4);
             spirit.trailPts.visible = false;
             if (spirit.mixer) spirit.mixer.update(dt);
             g.updateMatrixWorld(true);
