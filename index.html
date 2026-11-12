@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#05080e">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>SU CITY · Deniz Şehri · v23</title>
+    <title>SU CITY · Deniz Şehri · v24</title>
     <style>
         html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
         canvas { display: block; touch-action: none; }
@@ -844,6 +844,8 @@ canvas{touch-action:none}
             Object.keys(tints).forEach(k => { MAT['lg_' + k] = lgMaterial({ thick: 1.5, frost: 0.03, disp: 0.035, tint: tints[k][0], tintA: tints[k][1], refl: 0.85, cut: true }); MAT['mir_' + k] = MAT['lg_' + k]; });
             MAT.bridgeGlass = lgMaterial({ thick: 1.1, frost: 0.12, disp: 0.03, tint: 0xeaf6f8, tintA: 0.08, refl: 0.8, cut: true });
             MAT.roadGlass = lgMaterial({ thick: 0.6, frost: 0.28, disp: 0.02, tint: 0xe2f3f6, tintA: 0.1, refl: 0.7 });
+            // v24 · yol camı tek parça: kavşak ve köprü bindirmelerinde her piksel yalnız bir kez çizilir (çift kat cam, ek yeri yok)
+            Object.assign(MAT.roadGlass, { stencilWrite: true, stencilRef: 1, stencilWriteMask: 1, stencilFuncMask: 1, stencilFunc: THREE.NotEqualStencilFunc, stencilZPass: THREE.ReplaceStencilOp, stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp });
             MAT.sphereGlass = lgMaterial({ thick: 5.0, frost: 0.0, disp: 0.06, tint: 0xf4fbff, tintA: 0.04, refl: 1.0, glare: 1.6 });
             MAT.ringGlass = lgMaterial({ thick: 2.0, frost: 0.0, disp: 0.05, tint: 0xfff4e2, tintA: 0.08, refl: 1.0, glare: 1.8 });
             MAT.sphereMirror = new THREE.MeshStandardMaterial({ color: 0xf6f7fa, metalness: 1, roughness: 0.01, envMap: liveEnv, envMapIntensity: 1.25 });
@@ -971,7 +973,7 @@ canvas{touch-action:none}
         function init() {
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 16000);
-            renderer = new THREE.WebGLRenderer({ antialias: !IS_MOBILE && Q.tier >= 2, powerPreference: IS_MOBILE ? 'default' : 'high-performance', stencil: false });
+            renderer = new THREE.WebGLRenderer({ antialias: !IS_MOBILE && Q.tier >= 2, powerPreference: IS_MOBILE ? 'default' : 'high-performance', stencil: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PR)); // v20 · en yüksek netlik (yönetici yalnız gerçekten yavaşlarsa düşürür)
             GOV.prMax = Math.min(window.devicePixelRatio || 1, MAX_PR);
@@ -2363,7 +2365,7 @@ canvas{touch-action:none}
                 nb(vec2( 1.0, -1.0), 0.1667, acc, hn); nb(vec2(-1.0, -1.0), 0.1667, acc, hn);
                 float add = pourAdd();
                 // iki bina rengi aynı anda dökülür, akış içinde iç içe geçer (kirli döküm)
-                vec3 sc = mix(uSrcCol, uSrcCol2, step(0.55, qn(wp * 0.22 + vec2(uTime * 0.12, -uTime * 0.08)))); // v18 · sakin: iki renk lekeleri yavaş değişir
+                vec3 sc = mix(uSrcCol, uSrcCol2, step(0.55, qn(wp * 0.18 + 7.3))); // v24 · zamana bağlı yanıp sönme yok: iki renk yolda sabit şeritler halinde dökülür
                 acc += add * sc; hn += add;
                 if (add > gBest) { gBest = add; gBestC = sc; }
                 if (add > 1e-5) { gMin = min(gMin, sc.x); gMax = max(gMax, sc.x); }
@@ -2415,11 +2417,13 @@ canvas{touch-action:none}
         const FLOW_VIEW_FS = `
             uniform sampler2D uS; uniform sampler2D uT; uniform samplerCube uEnv; uniform float uExt; uniform float uTx; uniform float uTime;
             uniform vec3 uSun; uniform vec3 uSunCol; uniform float uNight; uniform sampler2D uPal;
-            uniform sampler2D uDTex; uniform vec2 uDTexel; uniform float uN; uniform float uTexM; uniform float uDispS; uniform float uDispG; uniform float uDispC;
+            uniform sampler2D uDTex; uniform vec2 uDTexel; uniform float uN; uniform vec2 uSpP; uniform float uSpS; uniform float uTexM; uniform float uDispS; uniform float uDispG; uniform float uDispC;
             varying vec3 vW; varying vec3 vN;
             ${GLSL_NOISE}
-            vec3 palAt(float i){ return texture2D(uPal, vec2((mod(i, 256.0) + 0.5) / 256.0, 0.5)).rgb; }
-            vec3 palC(float i, float soft){ float i0 = floor(i); float t = smoothstep(0.5 - soft, 0.5 + soft, i - i0); return mix(palAt(i0), palAt(i0 + 1.0), t); }
+            uniform float uPalN; uniform float uPalHi;
+            vec3 palAt(float i){ return texture2D(uPal, vec2((mod(i, uPalN) + 0.5) / uPalN, 0.5)).rgb; }
+            // v24 · henüz yazılmamış renklere asla bakılmaz (yanıp sönme yok)
+            vec3 palC(float i, float soft){ i = clamp(i, 0.0, uPalHi); float i0 = floor(i); float t = smoothstep(0.5 - soft, 0.5 + soft, i - i0); return mix(palAt(i0), palAt(i0 + 1.0), t); }
             float idxOf(vec4 s, float fb){ return s.a > 0.02 ? s.r / s.a : fb; }
             // yumuşatılmış indeks (~3 m): akışın ince çizgilenmesi görünmez, renk bölgeleri geniş ve akışkan kalır
             float idxB(vec2 uv, float fb, float R){
@@ -2502,7 +2506,12 @@ canvas{touch-action:none}
                 vec2 fl = vec2(fbm3(fp + vec2(tf, 0.0)) - 0.5, fbm3(fp + vec2(3.7, -tf)) - 0.5);
                 vec2 fl2 = vec2(fbm3(fp * 2.3 + vec2(-tf * 1.3, 5.1)) - 0.5, fbm3(fp * 2.3 + vec2(8.2, tf * 1.1)) - 0.5);
                 vec2 drift = (fl * 2.4 + fl2 * 0.9) * grow;
-                vec2 tuv = (vW.xz - disp * 0.35 * grow + drift * 1.4) / vec2(uTexM, uTexM * 1.2383);
+                // v24 · ruhun izinde gerçekçi viskoz dalga: arkasında genişleyen, hızla sönen yumuşak halkalar (yalnız yürürken)
+                vec2 rp = vW.xz - uSpP; float rr = length(rp) + 1e-3;
+                float wake = uSpS * exp(-rr / 5.5) * smoothstep(0.6, 2.0, rr);
+                float ring = sin(rr * 2.3 - uTime * 5.0) * wake;
+                vec2 rdir = rp / rr;
+                vec2 tuv = (vW.xz + drift * 1.4 + rdir * ring * 0.35) / vec2(uTexM, uTexM * 1.2383); // birikmiş akış kayması dokuya uygulanmaz → desen küçülmez/çizgilenmez
                 float L = texture2D(uDTex, tuv).r;
                 float tdx = uDTexel.x * 1.5, tdy = uDTexel.y * 1.5;
                 float Lx = texture2D(uDTex, tuv + vec2(tdx, 0.0)).r - texture2D(uDTex, tuv - vec2(tdx, 0.0)).r;
@@ -2523,7 +2532,7 @@ canvas{touch-action:none}
                 vec2 sp = vec2(dot(vW.xz, sd), dot(vW.xz, vec2(-sd.y, sd.x)));
                 float brush = qn(vec2(sp.x * 0.9, sp.y * 7.0)) * 0.6 + qn(vec2(sp.x * 2.1, sp.y * 16.0)) * 0.4;
                 col *= 1.0 + (brush - 0.5) * 0.06 * nearD;
-                hc = ((L - 0.5) * 0.012 * grow + (brush - 0.5) * 0.004) * nearD;
+                hc = ((L - 0.5) * 0.012 * grow + (brush - 0.5) * 0.004) * nearD + ring * 0.008 * grow;
                 // normal: boya yüzeyinin eğimi + hücre kraterleri (yüzey gradyanı yöntemi)
                 vec3 Nb = normalize(vN);
                 vec3 dpdx = dFdx(vW), dpdy = dFdy(vW);
@@ -2579,7 +2588,7 @@ canvas{touch-action:none}
         const FLOW = {
             ok: false, EXT: 615, N: 0, R: 0, DT: 1 / 90, MAXS: IS_MOBILE ? 2 : 3, K: 340, TAU: 0.0035, RATE: 4.6, RAD: 3.2, HSET: 0.28,
             key: 'sucity.flow.v1', last: null, log: [], logD: 0, changed: false, saveT: 0, acc: 0, activeUntil: -1, lastStrokeAt: -1,
-            cur: null, step: null, col: [0.6, 0.6, 0.6], col2: [0.5, 0.5, 0.5], palN: 256, palI: 0, idxA: 0, idxB: 1, colShow: new THREE.Color(0.6, 0.6, 0.6), colD: 0, colLen: 3, colHex: '#999999', seed: 0.37, pi: 0,
+            cur: null, step: null, col: [0.6, 0.6, 0.6], col2: [0.5, 0.5, 0.5], palN: 2048, palI: 0, idxA: 0, idxB: 1, pourT: 0, quietT: 9, colShow: new THREE.Color(0.6, 0.6, 0.6), colD: 0, colLen: 3, colHex: '#999999', seed: 0.37, pi: 0,
             grid: null, G: 256, rt: [], stream: null,
             supported() {
                 if (!renderer || SAFE_MODE) return false;
@@ -2588,7 +2597,10 @@ canvas{touch-action:none}
                 return ex.has('OES_texture_half_float') && ex.has('OES_texture_half_float_linear') && (ex.has('EXT_color_buffer_half_float') || ex.has('WEBGL_color_buffer_float'));
             },
             mkRT(n, filter) {
-                const r = new THREE.WebGLRenderTarget(n, n, { type: THREE.HalfFloatType, format: THREE.RGBAFormat, minFilter: filter, magFilter: filter, depthBuffer: false, stencilBuffer: false, generateMipmaps: false });
+                // v24 · mümkünse 32 bit kayan nokta: renk indeksleri zamanla büyüse de hassasiyet kaybı (titreyen renk, çizgilenme) olmaz
+                const ex = renderer.extensions, f32 = renderer.capabilities.isWebGL2 && ex.has('EXT_color_buffer_float') && ex.has('OES_texture_float_linear');
+                if (this.f32 === undefined) this.f32 = f32;
+                const r = new THREE.WebGLRenderTarget(n, n, { type: this.f32 ? THREE.FloatType : THREE.HalfFloatType, format: THREE.RGBAFormat, minFilter: filter, magFilter: filter, depthBuffer: false, stencilBuffer: false, generateMipmaps: false });
                 r.texture.generateMipmaps = false; r.texture.wrapS = r.texture.wrapT = THREE.ClampToEdgeWrapping; this.rt.push(r); return r;
             },
             complete(r) {
@@ -2633,16 +2645,18 @@ canvas{touch-action:none}
                     vertexShader: FLOW_VIEW_VS, fragmentShader: FLOW_VIEW_FS, extensions: { derivatives: true }, transparent: true, depthWrite: true, blending: THREE.NormalBlending,
                     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4
                 });
+                Object.assign(this.mat, { stencilWrite: true, stencilRef: 2, stencilWriteMask: 2, stencilFuncMask: 2, stencilFunc: THREE.NotEqualStencilFunc, stencilZPass: THREE.ReplaceStencilOp, stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp });
                 this.mesh = new THREE.Mesh(geo, this.mat); this.mesh.renderOrder = 7; this.mesh.frustumCulled = false; this.mesh.matrixAutoUpdate = false;
                 scene.add(this.mesh); hiddenInMirror.push(this.mesh);
                 this.grid = new Uint8Array(this.G * this.G);
+                if (!this.f32) this.palN = 256; // yarım hassasiyette küçük halka
                 this.palData = new Uint8Array(this.palN * 4).fill(255);
                 this.palTex = new THREE.DataTexture(this.palData, this.palN, 1, THREE.RGBAFormat);
                 this.palTex.minFilter = this.palTex.magFilter = THREE.NearestFilter; this.palTex.generateMipmaps = false; this.palTex.needsUpdate = true;
-                this.mat.uniforms.uPal = { value: this.palTex };
+                this.mat.uniforms.uPal = { value: this.palTex }; this.mat.uniforms.uPalN = { value: this.palN }; this.mat.uniforms.uPalHi = { value: 1 };
                 // yer değiştirme haritası: sanatçının akrilik dokusu (eser değil; yalnız boya için)
                 const dt = new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1, THREE.RGBAFormat); dt.needsUpdate = true;
-                Object.assign(this.mat.uniforms, { uN: { value: this.N }, uDTex: { value: dt }, uDTexel: { value: new THREE.Vector2(1 / 1179, 1 / 1460) }, uTexM: { value: 13.0 }, uDispS: { value: 4.0 }, uDispG: { value: 6.0 }, uDispC: { value: 1.5 } });
+                Object.assign(this.mat.uniforms, { uSpP: { value: new THREE.Vector2(1e5, 1e5) }, uSpS: { value: 0 }, uN: { value: this.N }, uDTex: { value: dt }, uDTexel: { value: new THREE.Vector2(1 / 1179, 1 / 1460) }, uTexM: { value: 13.0 }, uDispS: { value: 4.0 }, uDispG: { value: 6.0 }, uDispC: { value: 1.5 } });
                 new THREE.TextureLoader().setCrossOrigin('anonymous').load(DISP_TEX_URL, t => {
                     t.wrapS = t.wrapT = THREE.MirroredRepeatWrapping; t.anisotropy = renderer.capabilities.getMaxAnisotropy();
                     t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter;
@@ -2723,8 +2737,10 @@ canvas{touch-action:none}
                     this.idxA = this.palI; this.idxB = this.palI + 1;
                     const cA = this.hexRGB(pick);
                     if (!this.palInit) { for (let i = 0; i < this.palN; i++) put(i, i % 2 ? this.col2 : cA); this.palInit = true; }
-                    put(this.idxA, cA); put(this.idxB, this.col2); for (let k = 2; k < 6; k++) put(this.idxA + k, k % 2 ? this.col2 : cA);
-                    this.palI = (this.palI + 2) % this.palN; this.palTex.needsUpdate = true;
+                    // v24 · yalnız yeni iki renk yazılır; önceden yazma yok. Tam hassasiyette indeks sürekli artar (eski boyanın rengi değişmez)
+                    put(this.idxA, cA); put(this.idxB, this.col2);
+                    this.palI = this.f32 ? this.palI + 2 : (this.palI + 2) % this.palN; this.palTex.needsUpdate = true;
+                    this.mat.uniforms.uPalHi.value = this.f32 ? this.idxB : 1e9;
                 }
                 this.col = this.hexRGB(pick); this.seed = Math.random();
                 this.colLen = 4.0 + Math.random() * 4.0;
@@ -2749,6 +2765,10 @@ canvas{touch-action:none}
                 const rateK = this.lastStrokeAt < 0 ? 0 : since < 0.12 ? 1 : Math.exp(-(since - 0.12) / 0.3);
                 const pouring = rateK > 0.02 && !!this.cur;
                 if (pouring) this.activeUntil = now + 45;
+                // v24 · zarif başlangıç: her yeni yürüyüşte döküm ince başlar, ~3 sn'de tam akışa ulaşır
+                if (pouring) { this.pourT += dt; this.quietT = 0; } else { this.quietT += dt; if (this.quietT > 1.5) this.pourT = 0; }
+                this.startK = 0.18 + 0.82 * (1 - Math.exp(-this.pourT / 1.1));
+                if (car && this.mat.uniforms.uSpP) { this.mat.uniforms.uSpP.value.set(car.position.x, car.position.z); const sp = Math.min(1, Math.abs(MOVE.speed) / 9); this.mat.uniforms.uSpS.value += (sp - this.mat.uniforms.uSpS.value) * Math.min(1, dt * 3); }
                 this.updateStream(pouring, rateK, dt);
                 this.saveT += dt; if (this.changed && this.saveT > 6) this.save();
                 if (now > this.activeUntil || !this.cur) { this.acc = 0; return; }
@@ -2765,7 +2785,7 @@ canvas{touch-action:none}
                     const s0 = this.step || c, f = 1 / (n - k), bx = s0.x + (c.x - s0.x) * f, bz = s0.z + (c.z - s0.z) * f;
                     [this.matS, this.matT].forEach(m => {
                         const u = m.uniforms; u.uRect.value.set(rect[0], rect[1], rect[2], rect[3]); u.uTime.value = t;
-                        u.uSrcA.value.set(toUV(s0.x), toUV(s0.z), this.RAD / (2 * this.EXT), pouring ? this.RATE * rateK : 0); u.uSrcB.value.set(toUV(bx), toUV(bz));
+                        u.uSrcA.value.set(toUV(s0.x), toUV(s0.z), this.RAD * (0.5 + 0.5 * this.startK) / (2 * this.EXT), pouring ? this.RATE * rateK * this.startK : 0); u.uSrcB.value.set(toUV(bx), toUV(bz));
                     });
                     this.matS.uniforms.uSrcCol.value.set(this.idxA, this.idxA, 0); this.matS.uniforms.uSrcCol2.value.set(this.idxB, this.idxB, 0);
                     this.matT.uniforms.uSeed.value = this.seed;
