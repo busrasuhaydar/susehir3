@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#05080e">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>SU CITY · Deniz Şehri · v22</title>
+    <title>SU CITY · Deniz Şehri · v23</title>
     <style>
         html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
         canvas { display: block; touch-action: none; }
@@ -2495,7 +2495,7 @@ canvas{touch-action:none}
                 //  · çok hafif yağlı boya: akış yönünde fırça izleri ve ince bir kabartma ışığı
                 float kk = 1.0 / (2.0 * uExt);
                 float grow = 1.0 - exp(-age / 2.2);
-                float nearD = 1.0 - smoothstep(30.0, 160.0, dist);
+                float nearD = 1.0 - smoothstep(45.0, 220.0, dist);
                 // nazik sürekli akış (ruh dururken de): iki katmanlı yavaş akış alanı
                 float tf = uTime * 0.045;
                 vec2 fp = vW.xz * 0.035;
@@ -2508,17 +2508,16 @@ canvas{touch-action:none}
                 float Lx = texture2D(uDTex, tuv + vec2(tdx, 0.0)).r - texture2D(uDTex, tuv - vec2(tdx, 0.0)).r;
                 float Ly = texture2D(uDTex, tuv + vec2(0.0, tdy)).r - texture2D(uDTex, tuv - vec2(0.0, tdy)).r;
                 vec2 dmap = vec2(L - 0.5, texture2D(uDTex, tuv * 0.5 + 0.37).r - 0.5) * 2.0;
-                vec2 gL = vec2(Lx, Ly); gL = gL / (length(gL) + 0.25) * 0.25; // sert hücre duvarlarında ani sıçrama yok
-                vec2 off = ((dmap * uDispS + gL * uDispG) * nearD * grow + drift) * kk;
-                float shift = clamp((0.5 - L) * uDispC, -0.45, 0.45) * grow * nearD; // v22 · yumuşak: en fazla yarım renk adımı
+                vec2 off = ((dmap * uDispS + vec2(Lx, Ly) * uDispG * nearD) * grow + drift) * kk;
+                float shift = clamp((0.5 - L) * uDispC, -0.9, 0.9) * grow * mix(0.35, 1.0, nearD);
                 // renk uzayında çift doğrusal: 4 teksel → 4 palet rengi → harmanla
                 vec2 tp = (uv + off) * uN - 0.5; vec2 tb = floor(tp), tw = tp - tb;
                 float ia = idxOf(texture2D(uS, (tb + vec2(0.5, 0.5)) / uN), u0), ib = idxOf(texture2D(uS, (tb + vec2(1.5, 0.5)) / uN), ia);
                 float ic = idxOf(texture2D(uS, (tb + vec2(0.5, 1.5)) / uN), ia), id = idxOf(texture2D(uS, (tb + vec2(1.5, 1.5)) / uN), ia);
-                float sf = 0.3;
+                float sf = 0.22;
                 vec3 col = mix(mix(palC(ia + shift, sf), palC(ib + shift, sf), tw.x), mix(palC(ic + shift, sf), palC(id + shift, sf), tw.x), tw.y);
                 // doku hacmi: renkleri karartmadan hücre kubbeleri ve duvar oyukları
-                col *= mix(1.0, mix(0.88, 1.07, smoothstep(0.08, 0.85, L)), grow * nearD);
+                col *= mix(1.0, mix(0.82, 1.1, smoothstep(0.08, 0.85, L)), grow * mix(0.5, 1.0, nearD));
                 // çok hafif yağlı boya: akış yönünde uzayan fırça dokusu
                 vec2 sd = normalize(drift + disp * 0.02 + vec2(1e-3, 0.0));
                 vec2 sp = vec2(dot(vW.xz, sd), dot(vW.xz, vec2(-sd.y, sd.x)));
@@ -2643,7 +2642,7 @@ canvas{touch-action:none}
                 this.mat.uniforms.uPal = { value: this.palTex };
                 // yer değiştirme haritası: sanatçının akrilik dokusu (eser değil; yalnız boya için)
                 const dt = new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1, THREE.RGBAFormat); dt.needsUpdate = true;
-                Object.assign(this.mat.uniforms, { uN: { value: this.N }, uDTex: { value: dt }, uDTexel: { value: new THREE.Vector2(1 / 1179, 1 / 1460) }, uTexM: { value: 13.0 }, uDispS: { value: 2.0 }, uDispG: { value: 2.6 }, uDispC: { value: 0.7 } });
+                Object.assign(this.mat.uniforms, { uN: { value: this.N }, uDTex: { value: dt }, uDTexel: { value: new THREE.Vector2(1 / 1179, 1 / 1460) }, uTexM: { value: 13.0 }, uDispS: { value: 4.0 }, uDispG: { value: 6.0 }, uDispC: { value: 1.5 } });
                 new THREE.TextureLoader().setCrossOrigin('anonymous').load(DISP_TEX_URL, t => {
                     t.wrapS = t.wrapT = THREE.MirroredRepeatWrapping; t.anisotropy = renderer.capabilities.getMaxAnisotropy();
                     t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter;
