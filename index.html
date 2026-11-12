@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#05080e">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>SU CITY · Deniz Şehri · v18</title>
+    <title>SU CITY · Deniz Şehri · v19</title>
     <style>
         html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
         canvas { display: block; touch-action: none; }
@@ -2300,6 +2300,7 @@ canvas{touch-action:none}
         //    sınırlarında yoğunlaşır, zamanla büyür, akış yönünde uzar; içleri alttaki katmanın rengini gösterir, çevrelerinde dantel
         // Alan yol maskesiyle sınırlıdır (yalnız cam yol yüzeyi), hesap yalnız ruhun çevresindeki pencerede yapılır (mobilde de hafif).
         // Renkler o anda en yakın binaların eser paletlerinden gelir ve yürüdükçe sürekli değişir.
+        const DISP_TEX_URL = 'https://raw.githubusercontent.com/busrasuhaydar/newspaceoverthinktexture/main/assest/10myspacetexture.png';
         const FLOW_QUAD_VS = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
         const FLOW_COMMON = `
             uniform sampler2D uS; uniform sampler2D uM; uniform vec4 uRect; uniform float uTx; uniform float uMeter; uniform float uDt;
@@ -2413,6 +2414,7 @@ canvas{touch-action:none}
         const FLOW_VIEW_FS = `
             uniform sampler2D uS; uniform sampler2D uT; uniform samplerCube uEnv; uniform float uExt; uniform float uTx; uniform float uTime;
             uniform vec3 uSun; uniform vec3 uSunCol; uniform float uNight; uniform sampler2D uPal;
+            uniform sampler2D uDTex; uniform vec2 uDTexel; uniform float uTexM; uniform float uDispS; uniform float uDispG; uniform float uDispC;
             varying vec3 vW; varying vec3 vN;
             ${GLSL_NOISE}
             vec3 palAt(float i){ return texture2D(uPal, vec2((mod(i, 256.0) + 0.5) / 256.0, 0.5)).rgb; }
@@ -2484,76 +2486,26 @@ canvas{touch-action:none}
                 vec4 T = texture2D(uT, uv);
                 float age = T.r, seed = T.g; vec2 disp = T.ba;
                 float hc = 0.0;
-                // v15 · SIVI MERMER: alan bükmeli akış döküm indeksini kıvırır → ardışık gerçek eser renkleri ince, uzun, kıvrımlı
-                // şeritler halinde iç içe geçer. Renk daima saf eser rengi (ortalama/gri yok); genç boya akmaya devam eder.
-                float tt = uTime * 0.25 * (1.0 - 0.6 * smoothstep(8.0, 60.0, age)) + seed * 3.0;
-                float wF = smoothstep(80.0, 300.0, dist);
-                float msc = mix(0.085, 0.04, wF);
-                vec2 p = vW.xz * msc;
-                vec2 q = vec2(fbm3(p + vec2(0.0, tt)), fbm3(p + vec2(5.2, 1.3) - tt * 0.8));
-                vec2 r = vec2(fbm3(p + 3.0 * q + vec2(1.7, 9.2) + tt * 0.5), fbm3(p + 3.0 * q + vec2(8.3, 2.8) - tt * 0.4));
-                float f = fbm3(p + 3.2 * r);
+                // v19 · DOKU YER DEĞİŞTİRME (Photoshop 'Displace' gibi): sanatçının akrilik hücre dokusu (gri ton) bir yer değiştirme
+                // haritası olarak kullanılır. Doku parlaklığı, boyanın renk alanını kaydırır (0.5 = kayma yok), parlaklık gradyanı da
+                // hücre duvarlarında renkleri dışarı iter → binalardan gelen renkler dokunun hücre biçimini alır. Hareket yalnız ruhtan:
+                // boya döküldükçe yer değiştirme şiddeti sıfırdan büyür (hücreler açılır), akış yönünde dokuyu sürükler, sonra donar.
                 float kk = 1.0 / (2.0 * uExt);
-                float amp = mix(5.0, 12.0, wF);
-                float uA = idxB(uv + (r - 0.5) * 2.0 * amp * kk, u0, 3.0 * kk);
-                float uB = idxB(uv - (q - 0.5) * 2.0 * amp * kk, u0, 3.0 * kk);
-                float sh = (f - 0.5) * 2.6 + (r.x - 0.5) * 1.4;
-                float soft = 0.3 + fwidth(sh + uA) * 2.0;
-                vec3 cA = palC(uA + sh, soft), cB = palC(uB + sh * 0.7 + 0.5, soft);
-                float a1 = fwidth(f) + 0.05;
-                vec3 col = mix(cA, cB, smoothstep(0.5 - a1, 0.5 + a1, f));
-                hc = (f - 0.5) * 0.006 * (1.0 - wF);
-                // v15 · AKRİLİK HÜCRELER: yuvarlak, ayrık, kümeler halinde; her hücre başka bir gerçek eser renginde, çevresinde
-                // üçüncü bir eser renginden ince halka. Boyut, aralık, sıklık değişken; boya yaşlandıkça büyüyerek belirir.
-                float nearC = 1.0 - smoothstep(70.0, 220.0, dist);
-                if (nearC > 0.01) {
-                    // v16 · hücreler alttaki akışa bağlı: mermerle aynı bükme alanıyla taşınır, akışla birlikte süzülür ve kıvrılır
-                    vec2 W = vW.xz - (r - 0.5) * amp * 0.9 - (q - 0.5) * amp * 0.5 + (vec2(fbm3(vW.xz * 0.6), fbm3(vW.xz * 0.6 + 7.1)) - 0.5) * 0.9;
-                    float clusterN = qfbm(vW.xz * 0.03 + seed * 0.5 + 2.3);
-                    float core = smoothstep(0.5, 0.62, clusterN + 0.08 * smoothstep(0.5, 2.5, g));
-                    float halo = smoothstep(0.42, 0.52, clusterN);
-                    float grow = 1.0 - exp(-age / 3.0);
-                    float csz = 0.5;
-                    vec2 cp; vec3 v = vorC(W * csz, cp);
-                    float aaC = fwidth(v.x) + 0.01; // türev dallanma dışında alınır (dal içinde tanımsız olur, hücreleri uzatıyordu)
-                    float on = max(core * smoothstep(0.26, 0.34, v.z), halo * smoothstep(0.76, 0.84, v.z));
-                    if (on > 0.001) {
-                        float uc = idxOf(texture2D(uS, (cp / csz) * kk + 0.5), u0);
-                        // renkler akıştan: hücre, altındaki akış renginin bir sonraki eser rengiyle dolar (yumuşak geçiş, zıplama yok)
-                        vec3 cc = mix(palC(uc + 1.0 + floor(fract(v.z * 7.3) * 5.0), 0.35), col, 0.12);
-                        vec3 cr = palC(uc + 2.0 + floor(fract(v.z * 3.9) * 4.0), 0.35);
-                        float gc = 1.0 - exp(-texture2D(uT, (cp / csz) * kk + 0.5).r / 3.0); // yaş hücre merkezinden: hücre bütün büyür, dilimlenmez
-                        float rcell = mix(0.18, 0.6, fract(v.z * 13.7) * fract(v.z * 13.7)) * gc;
-                        float inside = 1.0 - smoothstep(rcell - aaC - 0.04, rcell + aaC, v.x);
-                        float rw = mix(0.04, 0.08, fract(v.z * 7.7));
-                        float ring = (1.0 - smoothstep(rw - aaC, rw + aaC, abs(v.x - rcell - rw * 0.5))) * step(0.04, rcell);
-                        float kc = on * nearC * step(0.05, gc);
-                        float rr = clamp(v.x / max(rcell, 0.05), 0.0, 1.0);
-                        // hücre içi: merkezde açık çekirdek, kenara doğru pigment yoğunlaşması (gerçek akrilik hücre kesiti)
-                        vec3 inner = mix(min(cc * 1.25 + 0.06, vec3(1.0)), cc, smoothstep(0.0, 0.7, rr));
-                        inner = mix(inner, cc * 0.72, smoothstep(0.75, 1.0, rr));
-                        col = mix(col, inner, inside * kc);
-                        col = mix(col, mix(cr, col, 0.35), ring * kc * 0.75);
-                        // hücre içinde ikinci, küçük iç hücre (çiçeklenme): bir başka eser rengi
-                        float ic = (1.0 - smoothstep(0.32 - aaC, 0.32 + aaC, rr)) * step(0.55, fract(v.z * 5.3)) * inside;
-                        col = mix(col, mix(palC(uc + 2.5, 0.35), col, 0.2), ic * kc * 0.85);
-                        hc += inside * (rcell - v.x) * 0.006 * kc;
-                    }
-                    // küçük uydu hücreler: kümelerin çevresinde serpiştirilmiş, değişik boylarda minik hücreler
-                    vec2 cp2; vec3 v2 = vorC(W * 1.1 + 31.7, cp2);
-                    float aa2 = fwidth(v2.x) + 0.01;
-                    float on2 = smoothstep(0.45, 0.58, clusterN) * smoothstep(0.68, 0.76, v2.z) * nearC;
-                    if (on2 > 0.001) {
-                        float uc2 = idxOf(texture2D(uS, ((cp2 - 31.7) / 1.1) * kk + 0.5), u0);
-                        float g2 = 1.0 - exp(-texture2D(uT, ((cp2 - 31.7) / 1.1) * kk + 0.5).r / 2.5);
-                        float r2 = mix(0.12, 0.38, fract(v2.z * 9.1)) * g2;
-                        float in2 = 1.0 - smoothstep(r2 - aa2, r2 + aa2, v2.x);
-                        float rg2 = (1.0 - smoothstep(0.05 - aa2, 0.05 + aa2, abs(v2.x - r2 - 0.03))) * step(0.04, r2);
-                        vec3 c2 = mix(palC(uc2 + 0.5 + floor(fract(v2.z * 4.3) * 2.0), 0.35), col, 0.2);
-                        col = mix(col, mix(min(c2 * 1.2 + 0.05, vec3(1.0)), c2, v2.x / max(r2, 0.04)), in2 * on2);
-                        col = mix(col, col * 0.7, rg2 * on2 * 0.6);
-                    }
-                }
+                float grow = 1.0 - exp(-age / 2.2);
+                vec2 tuv = (vW.xz - disp * 0.35 * grow) / vec2(uTexM, uTexM * 1.2383);
+                float L = texture2D(uDTex, tuv).r;
+                float tdx = uDTexel.x * 1.5, tdy = uDTexel.y * 1.5;
+                float Lx = texture2D(uDTex, tuv + vec2(tdx, 0.0)).r - texture2D(uDTex, tuv - vec2(tdx, 0.0)).r;
+                float Ly = texture2D(uDTex, tuv + vec2(0.0, tdy)).r - texture2D(uDTex, tuv - vec2(0.0, tdy)).r;
+                vec2 dmap = vec2(L - 0.5, texture2D(uDTex, tuv * 0.5 + 0.37).r - 0.5) * 2.0;
+                vec2 off = (dmap * uDispS + vec2(Lx, Ly) * uDispG) * grow;
+                float uD = idxOf(texture2D(uS, uv + off * kk), u0);
+                // hücre içleri kendi eser rengini alır, duvarlara yaklaştıkça komşu eser rengine geçer (dokunun açık/koyu yapısı)
+                float shift = (0.5 - L) * uDispC * grow * (1.0 - 0.6 * smoothstep(70.0, 260.0, dist)); // uzakta sakin (titreşim/moire yok)
+                vec3 col = palC(uD + shift, 0.18 + fwidth(uD + shift));
+                // doku gölgelemesi: renkleri karartmadan hacim (hücre kubbeleri, duvar oyukları)
+                col *= mix(1.0, mix(0.78, 1.12, smoothstep(0.08, 0.85, L)), grow);
+                hc = (L - 0.5) * 0.012 * grow * (1.0 - smoothstep(60.0, 200.0, dist));
                 // normal: boya yüzeyinin eğimi + hücre kraterleri (yüzey gradyanı yöntemi)
                 vec3 Nb = normalize(vN);
                 vec3 dpdx = dFdx(vW), dpdy = dFdy(vW);
@@ -2670,6 +2622,17 @@ canvas{touch-action:none}
                 this.palTex = new THREE.DataTexture(this.palData, this.palN, 1, THREE.RGBAFormat);
                 this.palTex.minFilter = this.palTex.magFilter = THREE.NearestFilter; this.palTex.generateMipmaps = false; this.palTex.needsUpdate = true;
                 this.mat.uniforms.uPal = { value: this.palTex };
+                // yer değiştirme haritası: sanatçının akrilik dokusu (eser değil; yalnız boya için)
+                const dt = new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1, THREE.RGBAFormat); dt.needsUpdate = true;
+                Object.assign(this.mat.uniforms, { uDTex: { value: dt }, uDTexel: { value: new THREE.Vector2(1 / 1179, 1 / 1460) }, uTexM: { value: 13.0 }, uDispS: { value: 4.0 }, uDispG: { value: 6.0 }, uDispC: { value: 1.5 } });
+                new THREE.TextureLoader().setCrossOrigin('anonymous').load(DISP_TEX_URL, t => {
+                    t.wrapS = t.wrapT = THREE.MirroredRepeatWrapping; t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+                    t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter;
+                    this.mat.uniforms.uDTex.value = t;
+                    if (t.image && t.image.width) this.mat.uniforms.uDTexel.value.set(1 / t.image.width, 1 / t.image.height);
+                    // doku oranı korunur (1179×1460): bir döşeme ≈ 13 m × 16 m
+                    this.mat.uniforms.uTexM.value = 13.0;
+                }, undefined, () => console.warn('Akış dokusu yüklenemedi; düz döküm kullanılıyor.'));
                 try { localStorage.removeItem('sucity.paint.v6'); localStorage.removeItem('sucity.paint.v5'); } catch (e) {}
                 // v13 · akış her açılışta sıfırdan başlar: önceki oturumun boyası yüklenmez, kaydedilmez
                 try { localStorage.removeItem(this.key); } catch (e) {}
