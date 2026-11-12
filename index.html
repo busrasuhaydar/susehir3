@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#05080e">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>SU CITY · Deniz Şehri · v17</title>
+    <title>SU CITY · Deniz Şehri · v18</title>
     <style>
         html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
         canvas { display: block; touch-action: none; }
@@ -2361,7 +2361,7 @@ canvas{touch-action:none}
                 nb(vec2( 1.0, -1.0), 0.1667, acc, hn); nb(vec2(-1.0, -1.0), 0.1667, acc, hn);
                 float add = pourAdd();
                 // iki bina rengi aynı anda dökülür, akış içinde iç içe geçer (kirli döküm)
-                vec3 sc = mix(uSrcCol, uSrcCol2, step(0.55, qn(wp * 0.35 + vec2(uTime * 0.6, -uTime * 0.4))));
+                vec3 sc = mix(uSrcCol, uSrcCol2, step(0.55, qn(wp * 0.22 + vec2(uTime * 0.12, -uTime * 0.08)))); // v18 · sakin: iki renk lekeleri yavaş değişir
                 acc += add * sc; hn += add;
                 if (add > gBest) { gBest = add; gBestC = sc; }
                 if (add > 1e-5) { gMin = min(gMin, sc.x); gMax = max(gMax, sc.x); }
@@ -2497,7 +2497,7 @@ canvas{touch-action:none}
                 float amp = mix(5.0, 12.0, wF);
                 float uA = idxB(uv + (r - 0.5) * 2.0 * amp * kk, u0, 3.0 * kk);
                 float uB = idxB(uv - (q - 0.5) * 2.0 * amp * kk, u0, 3.0 * kk);
-                float sh = (f - 0.5) * 3.2 + (r.x - 0.5) * 1.8;
+                float sh = (f - 0.5) * 2.6 + (r.x - 0.5) * 1.4;
                 float soft = 0.3 + fwidth(sh + uA) * 2.0;
                 vec3 cA = palC(uA + sh, soft), cB = palC(uB + sh * 0.7 + 0.5, soft);
                 float a1 = fwidth(f) + 0.05;
@@ -2746,7 +2746,7 @@ canvas{touch-action:none}
                     this.palI = (this.palI + 2) % this.palN; this.palTex.needsUpdate = true;
                 }
                 this.col = this.hexRGB(pick); this.seed = Math.random();
-                this.colLen = 2.2 + Math.random() * 2.6;
+                this.colLen = 4.0 + Math.random() * 4.0;
             },
             stroke(x, z) {
                 if (!this.ok) return;
