@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#05080e">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>SU CITY · Deniz Şehri · v19</title>
+    <title>SU CITY · Deniz Şehri · v20</title>
     <style>
         html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
         canvas { display: block; touch-action: none; }
@@ -491,9 +491,10 @@ canvas{touch-action:none}
             void main(){
                 // net bir cam-ışık kabuk: keskin parlak kenar + sakin, dolu bir iç (titreşimsiz, okunaklı siluet)
                 float e = 1.0 - abs(dot(normalize(vN), normalize(vV)));
-                float rim = smoothstep(0.45, 0.92, e);
-                float body = 0.32 + 0.04 * sin(uTime * 1.3);
-                float f = body + rim * 1.1;
+                // v20 · yumuşak, eşit parlayan ruh: sert oval çizgi ve iç karartı yok; merkezden kenara nazikçe sönen ışık
+                float rim = smoothstep(0.35, 1.0, e);
+                float body = 0.42 + 0.03 * sin(uTime * 1.3);
+                float f = body * (1.0 - 0.35 * e) + rim * 0.45;
                 gl_FragColor = vec4(mix(vec3(0.62, 0.84, 1.0), vec3(0.95, 0.99, 1.0), rim) * f, f * uOpacity);
             }`;
 
@@ -970,9 +971,9 @@ canvas{touch-action:none}
         function init() {
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 16000);
-            renderer = new THREE.WebGLRenderer({ antialias: !IS_MOBILE && Q.tier >= 3, powerPreference: IS_MOBILE ? 'default' : 'high-performance', stencil: false });
+            renderer = new THREE.WebGLRenderer({ antialias: !IS_MOBILE && Q.tier >= 2, powerPreference: IS_MOBILE ? 'default' : 'high-performance', stencil: false });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PR, IS_MOBILE ? MAX_PR : 1.5));
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PR)); // v20 · en yüksek netlik (yönetici yalnız gerçekten yavaşlarsa düşürür)
             GOV.prMax = Math.min(window.devicePixelRatio || 1, MAX_PR);
             // r128, envMap'siz MeshBasicMaterial'a cameraPosition göndermez. Eser gölgelendiricisi kendi kamera konumunu kullanır;
             // three her render() çağrısının sonunda malzeme önbelleğini sıfırladığı için, her çağrıdan hemen önce (ana kamera, ayna,
@@ -2368,7 +2369,7 @@ canvas{touch-action:none}
                 if (add > 1e-5) { gMin = min(gMin, sc.x); gMax = max(gMax, sc.x); }
                 hn = max(hn, 0.0);
                 if (gM0 < 0.5 || hn < 1e-4) { gl_FragColor = vec4(0.0); return; }
-                vec3 c = (gMax - gMin) > 3.5 ? gBestC : acc / hn;
+                vec3 c = (gMax - gMin) > 1.2 ? gBestC : acc / hn; // v20 · yalnız ardışık dökümler karışır
                 gl_FragColor = vec4(c * hn, hn);
             }`;
         // yardımcı alan: r = yaş (sn), g = döküm tohumu (hücre kimliği), ba = akışla biriken yer değiştirme (m) → hücreler boyaya yapışık
@@ -2414,7 +2415,7 @@ canvas{touch-action:none}
         const FLOW_VIEW_FS = `
             uniform sampler2D uS; uniform sampler2D uT; uniform samplerCube uEnv; uniform float uExt; uniform float uTx; uniform float uTime;
             uniform vec3 uSun; uniform vec3 uSunCol; uniform float uNight; uniform sampler2D uPal;
-            uniform sampler2D uDTex; uniform vec2 uDTexel; uniform float uTexM; uniform float uDispS; uniform float uDispG; uniform float uDispC;
+            uniform sampler2D uDTex; uniform vec2 uDTexel; uniform float uN; uniform float uTexM; uniform float uDispS; uniform float uDispG; uniform float uDispC;
             varying vec3 vW; varying vec3 vN;
             ${GLSL_NOISE}
             vec3 palAt(float i){ return texture2D(uPal, vec2((mod(i, 256.0) + 0.5) / 256.0, 0.5)).rgb; }
@@ -2486,26 +2487,43 @@ canvas{touch-action:none}
                 vec4 T = texture2D(uT, uv);
                 float age = T.r, seed = T.g; vec2 disp = T.ba;
                 float hc = 0.0;
-                // v19 · DOKU YER DEĞİŞTİRME (Photoshop 'Displace' gibi): sanatçının akrilik hücre dokusu (gri ton) bir yer değiştirme
-                // haritası olarak kullanılır. Doku parlaklığı, boyanın renk alanını kaydırır (0.5 = kayma yok), parlaklık gradyanı da
-                // hücre duvarlarında renkleri dışarı iter → binalardan gelen renkler dokunun hücre biçimini alır. Hareket yalnız ruhtan:
-                // boya döküldükçe yer değiştirme şiddeti sıfırdan büyür (hücreler açılır), akış yönünde dokuyu sürükler, sonra donar.
+                // v20 · DOKU YER DEĞİŞTİRME (Photoshop 'Displace'), artefaktsız:
+                //  · renk, simülasyon dokusunun 4 komşu tekselinden AYRI AYRI palete çevrilip renk uzayında harmanlanır → iki uzak döküm
+                //    karşılaştığında aradaki alakasız eser renkleri (gökkuşağı şeritleri, glitch) asla görünmez
+                //  · kayma en çok bir komşu renge kadar; ayrıntı ekran boyutuna göre süzülür (uzakta karıncalanma/moire yok)
+                //  · boya sen dururken de nazikçe akar: yavaş, düşük frekanslı bir akış alanı dokuyu ve renkleri birbirinin içine kıvırır
+                //  · çok hafif yağlı boya: akış yönünde fırça izleri ve ince bir kabartma ışığı
                 float kk = 1.0 / (2.0 * uExt);
                 float grow = 1.0 - exp(-age / 2.2);
-                vec2 tuv = (vW.xz - disp * 0.35 * grow) / vec2(uTexM, uTexM * 1.2383);
+                float nearD = 1.0 - smoothstep(45.0, 220.0, dist);
+                // nazik sürekli akış (ruh dururken de): iki katmanlı yavaş akış alanı
+                float tf = uTime * 0.045;
+                vec2 fp = vW.xz * 0.035;
+                vec2 fl = vec2(fbm3(fp + vec2(tf, 0.0)) - 0.5, fbm3(fp + vec2(3.7, -tf)) - 0.5);
+                vec2 fl2 = vec2(fbm3(fp * 2.3 + vec2(-tf * 1.3, 5.1)) - 0.5, fbm3(fp * 2.3 + vec2(8.2, tf * 1.1)) - 0.5);
+                vec2 drift = (fl * 2.4 + fl2 * 0.9) * grow;
+                vec2 tuv = (vW.xz - disp * 0.35 * grow + drift * 1.4) / vec2(uTexM, uTexM * 1.2383);
                 float L = texture2D(uDTex, tuv).r;
                 float tdx = uDTexel.x * 1.5, tdy = uDTexel.y * 1.5;
                 float Lx = texture2D(uDTex, tuv + vec2(tdx, 0.0)).r - texture2D(uDTex, tuv - vec2(tdx, 0.0)).r;
                 float Ly = texture2D(uDTex, tuv + vec2(0.0, tdy)).r - texture2D(uDTex, tuv - vec2(0.0, tdy)).r;
                 vec2 dmap = vec2(L - 0.5, texture2D(uDTex, tuv * 0.5 + 0.37).r - 0.5) * 2.0;
-                vec2 off = (dmap * uDispS + vec2(Lx, Ly) * uDispG) * grow;
-                float uD = idxOf(texture2D(uS, uv + off * kk), u0);
-                // hücre içleri kendi eser rengini alır, duvarlara yaklaştıkça komşu eser rengine geçer (dokunun açık/koyu yapısı)
-                float shift = (0.5 - L) * uDispC * grow * (1.0 - 0.6 * smoothstep(70.0, 260.0, dist)); // uzakta sakin (titreşim/moire yok)
-                vec3 col = palC(uD + shift, 0.18 + fwidth(uD + shift));
-                // doku gölgelemesi: renkleri karartmadan hacim (hücre kubbeleri, duvar oyukları)
-                col *= mix(1.0, mix(0.78, 1.12, smoothstep(0.08, 0.85, L)), grow);
-                hc = (L - 0.5) * 0.012 * grow * (1.0 - smoothstep(60.0, 200.0, dist));
+                vec2 off = ((dmap * uDispS + vec2(Lx, Ly) * uDispG * nearD) * grow + drift) * kk;
+                float shift = clamp((0.5 - L) * uDispC, -0.9, 0.9) * grow * mix(0.35, 1.0, nearD);
+                // renk uzayında çift doğrusal: 4 teksel → 4 palet rengi → harmanla
+                vec2 tp = (uv + off) * uN - 0.5; vec2 tb = floor(tp), tw = tp - tb;
+                float ia = idxOf(texture2D(uS, (tb + vec2(0.5, 0.5)) / uN), u0), ib = idxOf(texture2D(uS, (tb + vec2(1.5, 0.5)) / uN), ia);
+                float ic = idxOf(texture2D(uS, (tb + vec2(0.5, 1.5)) / uN), ia), id = idxOf(texture2D(uS, (tb + vec2(1.5, 1.5)) / uN), ia);
+                float sf = 0.22;
+                vec3 col = mix(mix(palC(ia + shift, sf), palC(ib + shift, sf), tw.x), mix(palC(ic + shift, sf), palC(id + shift, sf), tw.x), tw.y);
+                // doku hacmi: renkleri karartmadan hücre kubbeleri ve duvar oyukları
+                col *= mix(1.0, mix(0.82, 1.1, smoothstep(0.08, 0.85, L)), grow * mix(0.5, 1.0, nearD));
+                // çok hafif yağlı boya: akış yönünde uzayan fırça dokusu
+                vec2 sd = normalize(drift + disp * 0.02 + vec2(1e-3, 0.0));
+                vec2 sp = vec2(dot(vW.xz, sd), dot(vW.xz, vec2(-sd.y, sd.x)));
+                float brush = qn(vec2(sp.x * 0.9, sp.y * 7.0)) * 0.6 + qn(vec2(sp.x * 2.1, sp.y * 16.0)) * 0.4;
+                col *= 1.0 + (brush - 0.5) * 0.06 * nearD;
+                hc = ((L - 0.5) * 0.012 * grow + (brush - 0.5) * 0.004) * nearD;
                 // normal: boya yüzeyinin eğimi + hücre kraterleri (yüzey gradyanı yöntemi)
                 vec3 Nb = normalize(vN);
                 vec3 dpdx = dFdx(vW), dpdy = dFdy(vW);
@@ -2583,8 +2601,8 @@ canvas{touch-action:none}
                 renderer.setRenderTarget(null); renderer.setClearColor(cc, ca);
             },
             init(geos) {
-                this.N = IS_MOBILE ? (Q.tier >= 1 ? 1024 : 768) : (Q.tier >= 2 ? 2048 : 1536);
-                this.R = IS_MOBILE ? 256 : 512;
+                this.N = IS_MOBILE ? 1024 : 2048;
+                this.R = IS_MOBILE ? 320 : 512;
                 this.meter = 2 * this.EXT / this.N;
                 this.SA = this.mkRT(this.N, THREE.LinearFilter); this.TA = this.mkRT(this.N, THREE.LinearFilter);
                 this.SB = this.mkRT(this.R, THREE.NearestFilter); this.TB = this.mkRT(this.R, THREE.NearestFilter);
@@ -2624,9 +2642,9 @@ canvas{touch-action:none}
                 this.mat.uniforms.uPal = { value: this.palTex };
                 // yer değiştirme haritası: sanatçının akrilik dokusu (eser değil; yalnız boya için)
                 const dt = new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1, THREE.RGBAFormat); dt.needsUpdate = true;
-                Object.assign(this.mat.uniforms, { uDTex: { value: dt }, uDTexel: { value: new THREE.Vector2(1 / 1179, 1 / 1460) }, uTexM: { value: 13.0 }, uDispS: { value: 4.0 }, uDispG: { value: 6.0 }, uDispC: { value: 1.5 } });
+                Object.assign(this.mat.uniforms, { uN: { value: this.N }, uDTex: { value: dt }, uDTexel: { value: new THREE.Vector2(1 / 1179, 1 / 1460) }, uTexM: { value: 13.0 }, uDispS: { value: 4.0 }, uDispG: { value: 6.0 }, uDispC: { value: 1.5 } });
                 new THREE.TextureLoader().setCrossOrigin('anonymous').load(DISP_TEX_URL, t => {
-                    t.wrapS = t.wrapT = THREE.MirroredRepeatWrapping; t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+                    t.wrapS = t.wrapT = THREE.MirroredRepeatWrapping; t.anisotropy = renderer.capabilities.getMaxAnisotropy();
                     t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter;
                     this.mat.uniforms.uDTex.value = t;
                     if (t.image && t.image.width) this.mat.uniforms.uDTexel.value.set(1 / t.image.width, 1 / t.image.height);
@@ -4075,10 +4093,10 @@ canvas{touch-action:none}
             const shellMat = new THREE.ShaderMaterial({ uniforms: { uTime: U.time, uOpacity: { value: 1.0 } }, vertexShader: WISP_VS, fragmentShader: WISP_FS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
             const shell = new THREE.Mesh(new THREE.SphereGeometry(0.85, 40, 24), shellMat); shell.scale.set(1, 1.35, 1);
             const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
-            const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.25, 'rgba(200,232,255,0.55)'); gr.addColorStop(1, 'rgba(160,210,255,0)');
+            const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,0.95)'); gr.addColorStop(0.18, 'rgba(225,242,255,0.6)'); gr.addColorStop(0.5, 'rgba(180,220,255,0.16)'); gr.addColorStop(1, 'rgba(160,210,255,0)');
             g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
             const core = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
-            core.scale.set(3.0, 3.0, 1);
+            core.scale.set(2.3, 2.3, 1);
             core.material.depthTest = false; // v8 · billboard yol yüzeyiyle kesişip ince bir çizgiyle kesilmesin
             // v6 · DAHA BELİRGİN RUH: parlak gökyüzü ve açık renkli eserler önünde de okunsun diye arkasında ince, koyu-lacivert bir
             // kontur halesi (normal karışım; ışık saçmaz, çevreyi aydınlatmaz) + daha dolgun çekirdek ve hale.
@@ -4091,7 +4109,7 @@ canvas{touch-action:none}
             edge.scale.set(3.9, 3.9, 1); edge.renderOrder = 28; edge.material.depthTest = false;
             // daha belirgin: geniş, nefes alan bir ışık halesi ve yolda ruhun altında yumuşak bir ışık havuzu
             const aura = new THREE.Sprite(new THREE.SpriteMaterial({ map: core.material.map, color: 0x9fd4ff, transparent: true, opacity: 0.45, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
-            aura.scale.set(4.8, 4.8, 1); aura.material.depthTest = false;
+            aura.scale.set(5.2, 5.2, 1); aura.material.depthTest = false;
             // yerde net bir konum halkası ve gidiş yönünü gösteren ok: kalabalıkta, uzaktan ve kuş bakışında ruhu takip etmek kolaylaşır
             const pc = document.createElement('canvas'); pc.width = pc.height = 256; const pg = pc.getContext('2d');
             const pgr = pg.createRadialGradient(128, 128, 0, 128, 128, 120); pgr.addColorStop(0, 'rgba(190,228,255,0.55)'); pgr.addColorStop(0.45, 'rgba(160,210,255,0.18)'); pgr.addColorStop(1, 'rgba(160,210,255,0)');
@@ -4106,7 +4124,7 @@ canvas{touch-action:none}
             spirit.shell = shell; spirit.core = core; spirit.aura = aura; spirit.pool = pool; spirit.edge = edge;
             // cam yollar şeffaf ve renderOrder 6 ile çizilir; ruh ondan SONRA çizilmezse camın altında kalmış gibi görünür
             shell.renderOrder = 30; core.renderOrder = 31; aura.renderOrder = 29; pool.renderOrder = 28;
-            spirit.group.add(edge, shell, core, aura);
+            spirit.group.add(shell, core, aura); edge.visible = false; // v20 · içteki koyu halka kaldırıldı
             const N = 36, pos = new Float32Array(N * 3), sz = new Float32Array(N), ph = new Float32Array(N);
             for (let i = 0; i < N; i++) { sz[i] = 2.6 * (1 - i / N) + 0.4; ph[i] = i / N; }
             const tg = new THREE.BufferGeometry();
@@ -4131,7 +4149,7 @@ canvas{touch-action:none}
             // uzaktan / kuş bakışında da kaybolmasın: ekrandaki boyutu en az belli bir değerde tutulur
             const cd = camera ? camera.position.distanceTo(car.position) : 10, sc = Math.max(1, cd / 30);
             g.scale.setScalar(sc); if (spirit.pool) spirit.pool.scale.setScalar(Math.max(1, sc * 0.8));
-            if (spirit.aura) spirit.aura.material.opacity = 0.34 + 0.06 * Math.sin(t * 1.4);
+            if (spirit.aura) spirit.aura.material.opacity = 0.14 + 0.03 * Math.sin(t * 1.4);
             spirit.trailPts.visible = false;
             if (spirit.mixer) spirit.mixer.update(dt);
             g.updateMatrixWorld(true);
