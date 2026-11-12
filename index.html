@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#05080e">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>SU CITY · Deniz Şehri · v20</title>
+    <title>SU CITY · Deniz Şehri · v21</title>
     <style>
         html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
         canvas { display: block; touch-action: none; }
@@ -2301,7 +2301,7 @@ canvas{touch-action:none}
         //    sınırlarında yoğunlaşır, zamanla büyür, akış yönünde uzar; içleri alttaki katmanın rengini gösterir, çevrelerinde dantel
         // Alan yol maskesiyle sınırlıdır (yalnız cam yol yüzeyi), hesap yalnız ruhun çevresindeki pencerede yapılır (mobilde de hafif).
         // Renkler o anda en yakın binaların eser paletlerinden gelir ve yürüdükçe sürekli değişir.
-        const DISP_TEX_URL = 'https://raw.githubusercontent.com/busrasuhaydar/newspaceoverthinktexture/main/assest/10myspacetexture.png';
+        const DISP_TEX_BASE = 'https://raw.githubusercontent.com/busrasuhaydar/newspaceoverthinktexture/main/assest/', DISP_TEX_COUNT = 21;
         const FLOW_QUAD_VS = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
         const FLOW_COMMON = `
             uniform sampler2D uS; uniform sampler2D uM; uniform vec4 uRect; uniform float uTx; uniform float uMeter; uniform float uDt;
@@ -2415,7 +2415,7 @@ canvas{touch-action:none}
         const FLOW_VIEW_FS = `
             uniform sampler2D uS; uniform sampler2D uT; uniform samplerCube uEnv; uniform float uExt; uniform float uTx; uniform float uTime;
             uniform vec3 uSun; uniform vec3 uSunCol; uniform float uNight; uniform sampler2D uPal;
-            uniform sampler2D uDTex; uniform vec2 uDTexel; uniform float uN; uniform float uTexM; uniform float uDispS; uniform float uDispG; uniform float uDispC;
+            uniform float uN; uniform float uTexM; uniform float uDispS; uniform float uDispG; uniform float uDispC;
             varying vec3 vW; varying vec3 vN;
             ${GLSL_NOISE}
             vec3 palAt(float i){ return texture2D(uPal, vec2((mod(i, 256.0) + 0.5) / 256.0, 0.5)).rgb; }
@@ -2442,6 +2442,39 @@ canvas{touch-action:none}
             // hücre: (en yakın uzaklık, kenara uzaklık yaklaşığı, kimlik) + hücre merkezi
             // büyük dünya koordinatlarında da düzgün dağılan karma (sin tabanlı karma burada yönlü, uzamış hücreler üretiyordu)
             float hh(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+            // ---- v21 · çoklu yer değiştirme dokusu atlası (21 doku, 6 karo × 4 kanal) ----
+            uniform sampler2D uAtl; uniform sampler2D uAsp; uniform float uTexN; uniform float uAtlPad;
+            #ifdef ATL_GRAD
+            #define ATLS(uv, gx, gy) texture2DGradEXT(uAtl, uv, gx, gy)
+            #else
+            #define ATLS(uv, gx, gy) texture2D(uAtl, uv)
+            #endif
+            float aspK(float k){ return max(texture2D(uAsp, vec2((k + 0.5) / 32.0, 0.5)).r * 255.0 / 127.0, 0.3); }
+            // dünya konumundan (m) doku parlaklığı; aynalı tekrar, ekran türevleri sürekli dünya koordinatından (karo sınırı çizgisi yok)
+            float atlL(float k, vec2 w, vec2 dwx, vec2 dwy){
+                float a = aspK(k);
+                vec2 sc = 1.0 / vec2(uTexM, uTexM / a);
+                vec2 uvl = w * sc;
+                vec2 m = abs(fract(uvl * 0.5) * 2.0 - 1.0);
+                float i = mod(k, 6.0), c = floor(k / 6.0);
+                vec2 ts = vec2(1.0 / 3.0, 0.5) * (1.0 - 2.0 * uAtlPad);
+                vec2 auv = vec2(mod(i, 3.0), floor(i / 3.0)) * vec2(1.0 / 3.0, 0.5) + vec2(1.0 / 3.0, 0.5) * uAtlPad + m * ts;
+                vec4 t = ATLS(auv, dwx * sc * ts, dwy * sc * ts);
+                return dot(t, vec4(equal(vec4(c), vec4(0.0, 1.0, 2.0, 3.0))));
+            }
+            // bölgeler: her ~40 m'lik organik bölge başka bir doku kullanır; sınırlarda iki doku yumuşakça harmanlanır
+            vec3 regionK(vec2 p){
+                vec2 i = floor(p), f = fract(p); float d1 = 8.0, d2 = 8.0, a = 0.0, b = 0.0;
+                for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+                    vec2 g = vec2(float(x), float(y));
+                    vec2 o = 0.15 + 0.7 * vec2(hh(i + g), hh(i + g + 17.31));
+                    float d = length(g + o - f), id = hh(i + g + 5.77);
+                    if (d < d1) { d2 = d1; b = a; d1 = d; a = id; } else if (d < d2) { d2 = d; b = id; }
+                }
+                return vec3(floor(a * uTexN), floor(b * uTexN), 0.5 * (1.0 - smoothstep(0.0, 0.3, d2 - d1)));
+            }
+            float dispL(vec3 R, vec2 w, vec2 dwx, vec2 dwy){ return mix(atlL(R.x, w, dwx, dwy), atlL(R.y, w, dwx, dwy), R.z); }
+
             vec3 vorC(vec2 p, out vec2 cp){
                 vec2 i = floor(p), f = fract(p); float d1 = 8.0, d2 = 8.0, id = 0.0; cp = vec2(0.0);
                 for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
@@ -2487,43 +2520,60 @@ canvas{touch-action:none}
                 vec4 T = texture2D(uT, uv);
                 float age = T.r, seed = T.g; vec2 disp = T.ba;
                 float hc = 0.0;
-                // v20 · DOKU YER DEĞİŞTİRME (Photoshop 'Displace'), artefaktsız:
-                //  · renk, simülasyon dokusunun 4 komşu tekselinden AYRI AYRI palete çevrilip renk uzayında harmanlanır → iki uzak döküm
-                //    karşılaştığında aradaki alakasız eser renkleri (gökkuşağı şeritleri, glitch) asla görünmez
-                //  · kayma en çok bir komşu renge kadar; ayrıntı ekran boyutuna göre süzülür (uzakta karıncalanma/moire yok)
-                //  · boya sen dururken de nazikçe akar: yavaş, düşük frekanslı bir akış alanı dokuyu ve renkleri birbirinin içine kıvırır
-                //  · çok hafif yağlı boya: akış yönünde fırça izleri ve ince bir kabartma ışığı
+                // v21 · AKAN YER DEĞİŞTİRME (Photoshop 'Displace' + akış haritası):
+                //  · 21 akrilik dokunun her biri şehrin bir bölgesinde yer değiştirme haritasıdır; bölge sınırlarında harmanlanır
+                //  · DOKUNUN KENDİSİ AKAR: yavaş, kıvrımlı bir akış alanı boyunca sürekli taşınır (iki fazlı akış haritası, sıçramasız).
+                //    Sen dururken de hücreler ve renkler nazikçe birbirinin içine akmaya devam eder.
+                //  · renk, simülasyonun 4 komşu tekselinden ayrı ayrı palete çevrilip renk uzayında harmanlanır → glitch/gökkuşağı yok
+                //  · uzakta ayrıntı yumuşar (karıncalanma yok); çok hafif yağlı boya fırça izi
                 float kk = 1.0 / (2.0 * uExt);
                 float grow = 1.0 - exp(-age / 2.2);
-                float nearD = 1.0 - smoothstep(45.0, 220.0, dist);
-                // nazik sürekli akış (ruh dururken de): iki katmanlı yavaş akış alanı
-                float tf = uTime * 0.045;
-                vec2 fp = vW.xz * 0.035;
-                vec2 fl = vec2(fbm3(fp + vec2(tf, 0.0)) - 0.5, fbm3(fp + vec2(3.7, -tf)) - 0.5);
-                vec2 fl2 = vec2(fbm3(fp * 2.3 + vec2(-tf * 1.3, 5.1)) - 0.5, fbm3(fp * 2.3 + vec2(8.2, tf * 1.1)) - 0.5);
-                vec2 drift = (fl * 2.4 + fl2 * 0.9) * grow;
-                vec2 tuv = (vW.xz - disp * 0.35 * grow + drift * 1.4) / vec2(uTexM, uTexM * 1.2383);
-                float L = texture2D(uDTex, tuv).r;
-                float tdx = uDTexel.x * 1.5, tdy = uDTexel.y * 1.5;
-                float Lx = texture2D(uDTex, tuv + vec2(tdx, 0.0)).r - texture2D(uDTex, tuv - vec2(tdx, 0.0)).r;
-                float Ly = texture2D(uDTex, tuv + vec2(0.0, tdy)).r - texture2D(uDTex, tuv - vec2(0.0, tdy)).r;
-                vec2 dmap = vec2(L - 0.5, texture2D(uDTex, tuv * 0.5 + 0.37).r - 0.5) * 2.0;
-                vec2 off = ((dmap * uDispS + vec2(Lx, Ly) * uDispG * nearD) * grow + drift) * kk;
-                float shift = clamp((0.5 - L) * uDispC, -0.9, 0.9) * grow * mix(0.35, 1.0, nearD);
-                // renk uzayında çift doğrusal: 4 teksel → 4 palet rengi → harmanla
-                vec2 tp = (uv + off) * uN - 0.5; vec2 tb = floor(tp), tw = tp - tb;
-                float ia = idxOf(texture2D(uS, (tb + vec2(0.5, 0.5)) / uN), u0), ib = idxOf(texture2D(uS, (tb + vec2(1.5, 0.5)) / uN), ia);
-                float ic = idxOf(texture2D(uS, (tb + vec2(0.5, 1.5)) / uN), ia), id = idxOf(texture2D(uS, (tb + vec2(1.5, 1.5)) / uN), ia);
+                float nearD = 1.0 - smoothstep(30.0, 170.0, dist);
+                vec2 W = vW.xz;
+                vec2 dwx = dFdx(W), dwy = dFdy(W);
+                // akış alanı (kıvrım/curl gürültüsü): yavaşça değişir
+                float ts = uTime * 0.02;
+                vec2 cq = W * 0.022;
+                float n0 = fbm3(cq + ts), nx = fbm3(cq + vec2(0.07, 0.0) + ts), nz = fbm3(cq + vec2(0.0, 0.07) + ts);
+                vec2 vel = vec2(nz - n0, -(nx - n0)) / 0.07;
+                vel = vel / (length(vel) + 0.35) * 0.55;               // ≈ 0.5 m/sn, yumuşak
+                float PER = 7.0;
+                float ph0 = fract(uTime / PER), ph1 = fract(uTime / PER + 0.5);
+                float wt0 = 1.0 - abs(1.0 - 2.0 * ph0), wt1 = 1.0 - wt0;
+                vec2 bw = W - disp * 0.35 * grow;
+                vec2 w0 = bw - vel * ph0 * PER, w1 = bw - vel * ph1 * PER + vec2(4.3, 7.9);
+                vec3 R = regionK((W + (vec2(fbm3(W * 0.012), fbm3(W * 0.012 + 3.3)) - 0.5) * 30.0) / 42.0);
+                float ge = 0.14;
+                float L0 = dispL(R, w0, dwx, dwy), L0x = dispL(R, w0 + vec2(ge, 0.0), dwx, dwy), L0z = dispL(R, w0 + vec2(0.0, ge), dwx, dwy);
+                float L1 = dispL(R, w1, dwx, dwy), L1x = dispL(R, w1 + vec2(ge, 0.0), dwx, dwy), L1z = dispL(R, w1 + vec2(0.0, ge), dwx, dwy);
+                float L = L0 * wt0 + L1 * wt1;
+                vec2 gL = (vec2(L0x - L0, L0z - L0) * wt0 + vec2(L1x - L1, L1z - L1) * wt1) / ge;
+                gL = gL / (length(gL) + 3.0) * 3.0;                    // sert duvarlarda aşırı itme yok (glitch önler)
+                // renkler de akar: yavaş renk sürüklenmesi + akış yönünde taşınım (iki faz)
+                float tf = uTime * 0.06;
+                vec2 fp = W * 0.03;
+                vec2 drift = vec2(fbm3(fp + vec2(tf, 0.0)) - 0.5, fbm3(fp + vec2(3.7, -tf)) - 0.5) * 3.0 * grow;
+                vec2 dsp = ((vec2(L - 0.5) * uDispS + gL * uDispG * 0.12) * nearD) * grow;
+                float shift = clamp((0.5 - L) * uDispC, -0.8, 0.8) * grow * nearD;
                 float sf = 0.22;
-                vec3 col = mix(mix(palC(ia + shift, sf), palC(ib + shift, sf), tw.x), mix(palC(ic + shift, sf), palC(id + shift, sf), tw.x), tw.y);
+                vec3 colP[2];
+                for (int ph = 0; ph < 2; ph++) {
+                    float phv = ph == 0 ? ph0 : ph1;
+                    vec2 off = (dsp + drift + vel * (phv - 0.5) * PER * 0.6) * kk;
+                    vec2 tp = (uv + off) * uN - 0.5; vec2 tb = floor(tp), tw = tp - tb;
+                    float ia = idxOf(texture2D(uS, (tb + vec2(0.5, 0.5)) / uN), u0), ib = idxOf(texture2D(uS, (tb + vec2(1.5, 0.5)) / uN), ia);
+                    float ic = idxOf(texture2D(uS, (tb + vec2(0.5, 1.5)) / uN), ia), id = idxOf(texture2D(uS, (tb + vec2(1.5, 1.5)) / uN), ia);
+                    colP[ph] = mix(mix(palC(ia + shift, sf), palC(ib + shift, sf), tw.x), mix(palC(ic + shift, sf), palC(id + shift, sf), tw.x), tw.y);
+                }
+                vec3 col = colP[0] * wt0 + colP[1] * wt1;
                 // doku hacmi: renkleri karartmadan hücre kubbeleri ve duvar oyukları
-                col *= mix(1.0, mix(0.82, 1.1, smoothstep(0.08, 0.85, L)), grow * mix(0.5, 1.0, nearD));
-                // çok hafif yağlı boya: akış yönünde uzayan fırça dokusu
-                vec2 sd = normalize(drift + disp * 0.02 + vec2(1e-3, 0.0));
-                vec2 sp = vec2(dot(vW.xz, sd), dot(vW.xz, vec2(-sd.y, sd.x)));
+                col *= mix(1.0, mix(0.84, 1.1, smoothstep(0.06, 0.85, L)), grow * mix(0.4, 1.0, nearD));
+                // çok hafif yağlı boya
+                vec2 sd = normalize(vel + vec2(1e-3, 0.0));
+                vec2 sp = vec2(dot(W, sd), dot(W, vec2(-sd.y, sd.x)));
                 float brush = qn(vec2(sp.x * 0.9, sp.y * 7.0)) * 0.6 + qn(vec2(sp.x * 2.1, sp.y * 16.0)) * 0.4;
-                col *= 1.0 + (brush - 0.5) * 0.06 * nearD;
-                hc = ((L - 0.5) * 0.012 * grow + (brush - 0.5) * 0.004) * nearD;
+                col *= 1.0 + (brush - 0.5) * 0.05 * nearD;
+                hc = ((L - 0.5) * 0.012 * grow + (brush - 0.5) * 0.003) * nearD;
                 // normal: boya yüzeyinin eğimi + hücre kraterleri (yüzey gradyanı yöntemi)
                 vec3 Nb = normalize(vN);
                 vec3 dpdx = dFdx(vW), dpdy = dFdy(vW);
@@ -2630,7 +2680,7 @@ canvas{touch-action:none}
                 // görünen boya
                 this.mat = new THREE.ShaderMaterial({
                     uniforms: { uS: { value: this.SA.texture }, uT: { value: this.TA.texture }, uEnv: { value: LIVE_ENV.front ? LIVE_ENV.front.texture : null }, uExt: { value: this.EXT }, uTx: { value: 1 / this.N }, uTime: U.time, uSun: { value: LIGHT }, uSunCol: { value: SUN_COL }, uNight: U.night },
-                    vertexShader: FLOW_VIEW_VS, fragmentShader: FLOW_VIEW_FS, extensions: { derivatives: true }, transparent: true, depthWrite: true, blending: THREE.NormalBlending,
+                    vertexShader: FLOW_VIEW_VS, fragmentShader: FLOW_VIEW_FS, extensions: { derivatives: true, shaderTextureLOD: true }, defines: (renderer.capabilities.isWebGL2 || renderer.extensions.has('EXT_shader_texture_lod')) ? { ATL_GRAD: 1 } : {}, transparent: true, depthWrite: true, blending: THREE.NormalBlending,
                     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4
                 });
                 this.mesh = new THREE.Mesh(geo, this.mat); this.mesh.renderOrder = 7; this.mesh.frustumCulled = false; this.mesh.matrixAutoUpdate = false;
@@ -2640,17 +2690,10 @@ canvas{touch-action:none}
                 this.palTex = new THREE.DataTexture(this.palData, this.palN, 1, THREE.RGBAFormat);
                 this.palTex.minFilter = this.palTex.magFilter = THREE.NearestFilter; this.palTex.generateMipmaps = false; this.palTex.needsUpdate = true;
                 this.mat.uniforms.uPal = { value: this.palTex };
-                // yer değiştirme haritası: sanatçının akrilik dokusu (eser değil; yalnız boya için)
-                const dt = new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1, THREE.RGBAFormat); dt.needsUpdate = true;
-                Object.assign(this.mat.uniforms, { uN: { value: this.N }, uDTex: { value: dt }, uDTexel: { value: new THREE.Vector2(1 / 1179, 1 / 1460) }, uTexM: { value: 13.0 }, uDispS: { value: 4.0 }, uDispG: { value: 6.0 }, uDispC: { value: 1.5 } });
-                new THREE.TextureLoader().setCrossOrigin('anonymous').load(DISP_TEX_URL, t => {
-                    t.wrapS = t.wrapT = THREE.MirroredRepeatWrapping; t.anisotropy = renderer.capabilities.getMaxAnisotropy();
-                    t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter;
-                    this.mat.uniforms.uDTex.value = t;
-                    if (t.image && t.image.width) this.mat.uniforms.uDTexel.value.set(1 / t.image.width, 1 / t.image.height);
-                    // doku oranı korunur (1179×1460): bir döşeme ≈ 13 m × 16 m
-                    this.mat.uniforms.uTexM.value = 13.0;
-                }, undefined, () => console.warn('Akış dokusu yüklenemedi; düz döküm kullanılıyor.'));
+                // v21 · yer değiştirme haritaları: sanatçının 21 akrilik dokusu tek atlasa (6 karo × 4 kanal, gri ton) yerleşir
+                // (dokular eser değildir; yalnız yol boyası için). Yüklendikçe atlas güncellenir; hiç yüklenmezse döküm düz akar.
+                Object.assign(this.mat.uniforms, { uN: { value: this.N }, uTexM: { value: 13.0 }, uDispS: { value: 4.0 }, uDispG: { value: 6.0 }, uDispC: { value: 1.5 }, uTexN: { value: 1 }, uAtlPad: { value: 0.006 } });
+                this.loadAtlas();
                 try { localStorage.removeItem('sucity.paint.v6'); localStorage.removeItem('sucity.paint.v5'); } catch (e) {}
                 // v13 · akış her açılışta sıfırdan başlar: önceki oturumun boyası yüklenmez, kaydedilmez
                 try { localStorage.removeItem(this.key); } catch (e) {}
@@ -2678,6 +2721,7 @@ canvas{touch-action:none}
                 const m = Array.isArray(e.mesh.material) ? e.mesh.material[0] : e.mesh.material;
                 if (!m || !m.userData) return null;
                 if (m.userData.flowPal) return m.userData.flowPal;
+                if (!m.userData.palette && m.map && m.map.image && m.map.image.width) { try { ART.analyze(m.map.image, m); } catch (e) {} }
                 const pal = m.userData.flowColors && m.userData.flowColors.length >= 3 ? { colors: m.userData.flowColors } : m.userData.palette; if (!pal || !pal.colors || !pal.colors.length) return PAINT_C.palOf(e);
                 const sat = h => { const r = parseInt(h.slice(1, 3), 16) / 255, g = parseInt(h.slice(3, 5), 16) / 255, b = parseInt(h.slice(5, 7), 16) / 255, mx = Math.max(r, g, b), mn = Math.min(r, g, b); return (mx - mn) * (0.35 + mx); };
                 const list = pal.colors.slice().sort((x, y) => sat(y) - sat(x));
@@ -2700,19 +2744,21 @@ canvas{touch-action:none}
                 const nx = rp ? -rp.tz : 1, nz = rp ? rp.tx : 0;
                 let L = null, R = null, dL = 1e12, dR = 1e12, any = [];
                 for (const e of BUILDINGS) {
-                    const dx = e.mesh.position.x - x, dz = e.mesh.position.z - z, d = dx * dx + dz * dz; if (d > 90 * 90) continue;
+                    const dx = e.mesh.position.x - x, dz = e.mesh.position.z - z, d = dx * dx + dz * dz; if (d > 140 * 140) continue;
                     any.push([d, e]);
                     if (dx * nx + dz * nz >= 0) { if (d < dL) { dL = d; L = e; } } else if (d < dR) { dR = d; R = e; }
                 }
                 any.sort((a, b) => a[0] - b[0]);
                 const near = dL <= dR ? L : R, far = dL <= dR ? R : L;
                 const rest = any.map(a => a[1]).filter(e => e !== near && e !== far);
-                return { near: near || (any[0] && any[0][1]), far: far || (any[1] && any[1][1]) || (any[0] && any[0][1]), near2: rest[0], far2: rest[1] };
+                return { near: near || (any[0] && any[0][1]), far: far || (any[1] && any[1][1]) || (any[0] && any[0][1]), near2: rest[0], far2: rest[1], all: any.slice(0, 12).map(a => a[1]) };
             },
             nextColor(x, z) {
                 const s = this.sides(x, z);
-                this.flip = ((this.flip || 0) + 1) % 5;
-                const order = [s.near, s.far, s.near, s.near2 || s.near, s.far2 || s.far];
+                // v21 · çevredeki TÜM evler sırayla: önündeki ev, karşısındaki ev ve yakındaki diğer evler dönüşümlü
+                const L = s.all.filter(e => e !== s.near && e !== s.far);
+                const order = [s.near, s.far, L[0], s.near, L[1], s.far, L[2], L[3], s.near, L[4], s.far, L[5], L[6], L[7]];
+                this.flip = ((this.flip || 0) + 1) % order.length;
                 let pick = this.fromBuilding(order[this.flip]) || this.fromBuilding(s.near) || this.fromBuilding(s.far);
                 if (!pick) pick = PAINT_C.FALLBACK[Math.floor(Math.random() * PAINT_C.FALLBACK.length)];
                 const other = this.fromBuilding(this.flip === 2 ? s.near : s.far);
@@ -2777,9 +2823,40 @@ canvas{touch-action:none}
                     this.step = { x: bx, z: bz };
                 }
             },
-            // ruhtan yola inen ince, parlak boya akıntısı (yalnız dökerken)
+            loadAtlas() {
+                const S = IS_MOBILE ? 2048 : 4096, TW = Math.floor(S / 3), TH = S / 2;
+                const data = new Uint8Array(S * S * 4).fill(128);
+                const tex = new THREE.DataTexture(data, S, S, THREE.RGBAFormat);
+                tex.generateMipmaps = true; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.magFilter = THREE.LinearFilter;
+                tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping; tex.anisotropy = renderer.capabilities.getMaxAnisotropy(); tex.needsUpdate = true;
+                const ad = new Uint8Array(32 * 4).fill(Math.round(0.81 * 127)); const asp = new THREE.DataTexture(ad, 32, 1, THREE.RGBAFormat);
+                asp.minFilter = asp.magFilter = THREE.NearestFilter; asp.generateMipmaps = false; asp.needsUpdate = true;
+                Object.assign(this.mat.uniforms, { uAtl: { value: tex }, uAsp: { value: asp } });
+                const cv = document.createElement('canvas'); cv.width = TW; cv.height = TH; const cx = cv.getContext('2d', { willReadFrequently: true });
+                let k = 0, loaded = 0;
+                const next = () => {
+                    if (k >= DISP_TEX_COUNT) return;
+                    const slot = k++, im = new Image(); im.crossOrigin = 'anonymous';
+                    im.onload = () => {
+                        try {
+                            cx.drawImage(im, 0, 0, TW, TH);
+                            const px = cx.getImageData(0, 0, TW, TH).data, ch = Math.floor(slot / 6), t = slot % 6, ox = (t % 3) * TW, oy = Math.floor(t / 3) * TH;
+                            for (let y = 0; y < TH; y++) { let si = y * TW * 4, di = ((oy + y) * S + ox) * 4 + ch; for (let x = 0; x < TW; x++, si += 4, di += 4) data[di] = (px[si] * 77 + px[si + 1] * 150 + px[si + 2] * 29) >> 8; }
+                            ad[slot * 4] = Math.round(Math.min(2, im.width / im.height) * 127); asp.needsUpdate = true;
+                            loaded = Math.max(loaded, slot + 1); this.mat.uniforms.uTexN.value = loaded;
+                            if (slot === 0 || slot === 5 || slot === 11 || slot === DISP_TEX_COUNT - 1) tex.needsUpdate = true;
+                        } catch (e) { console.warn('Akış dokusu okunamadı:', slot + 1, e); }
+                        setTimeout(next, 60);
+                    };
+                    im.onerror = () => { console.warn('Akış dokusu yüklenemedi:', slot + 1); setTimeout(next, 60); };
+                    im.src = DISP_TEX_BASE + (slot + 1) + 'myspacetexture.png';
+                };
+                next();
+            },
+            // v21 · ruhtan yola inen boya akıntısı kaldırıldı (ruhun içinde koyu/renkli parça olarak görünüyordu)
             updateStream(pouring, k, dt) {
-                if (!car) return;
+                if (this.stream) this.stream.visible = false;
+                return;
                 if (!this.stream) {
                     const g = new THREE.CylinderGeometry(1, 1, 1, 14, 10, true); g.translate(0, 0.5, 0);
                     const m = new THREE.ShaderMaterial({ uniforms: { uTime: U.time, uLen: { value: 1.35 }, uR: { value: 0.1 }, uCol: { value: this.colShow }, uSun: { value: LIGHT }, uSunCol: { value: SUN_COL }, uNight: U.night, uEnv: { value: LIVE_ENV.front ? LIVE_ENV.front.texture : null } }, vertexShader: FLOW_STREAM_VS, fragmentShader: FLOW_STREAM_FS });
