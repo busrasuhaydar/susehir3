@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#05080e">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>SU CITY · Deniz Şehri · v26</title>
+    <title>SU CITY · Deniz Şehri · v27</title>
     <style>
         html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
         canvas { display: block; touch-action: none; }
@@ -344,6 +344,13 @@ canvas{touch-action:none}
                 float F = 0.02 + 0.98 * pow(1.0 - cosT, 5.0);
                 vec2 muv = vMirror.xy / vMirror.w + N.xz * (0.04 / (1.0 + dist * 0.006));
                 vec3 refl = sRGBToLinear(texture2D(uMirror, muv)).rgb;
+                // v27 · pürüzlü yansıma: dalgalı ve uzak suda yansıma doğal biçimde yumuşar ve dikey uzar (gerçek denizdeki gibi),
+                // sakin ve yakın suda keskin kalır. Ucuz: 4 ek örnek, ek geçiş yok.
+                float rough = clamp(length(slope) * 1.8 + farK * 0.5, 0.0, 1.0);
+                vec2 rr = vec2(0.0018, 0.0055) * rough;
+                vec3 rb = sRGBToLinear(texture2D(uMirror, muv + vec2(rr.x, rr.y))).rgb + sRGBToLinear(texture2D(uMirror, muv + vec2(-rr.x, -rr.y))).rgb
+                        + sRGBToLinear(texture2D(uMirror, muv + vec2(-rr.x, rr.y * 0.5))).rgb + sRGBToLinear(texture2D(uMirror, muv + vec2(rr.x, -rr.y * 0.5))).rgb;
+                refl = mix(refl, (refl * 2.0 + rb) / 6.0, smoothstep(0.05, 0.5, rough));
                 float r = length(p);
                 float openSea = smoothstep(610.0, 1200.0, r);
                 vec3 L = normalize(uSunDir);
@@ -3152,7 +3159,7 @@ canvas{touch-action:none}
         // Bir yükseltme kısa sürede yeniden düşüşe yol açarsa o adım 60 sn kilitlenir (salınım olmaz). Oturan kademe cihaza kaydedilir.
         const GOV = {
             prMax: 1, ring: new Float32Array(96), ri: 0, rn: 0, evalT: 0, cool: 4, good: 0, stack: [], lastUp: -1e9, blockUp: 0, stableT: 0, saved: false,
-            mirrorEvery: 1, mirrorLite: SAFE_MODE || (IS_MOBILE && Q.tier < 2), shadowEvery: IS_MOBILE ? 12 : 6,
+            mirrorEvery: 1, mirrorLite: SAFE_MODE || IS_MOBILE, // v27 · telefonda yansıma hep hafif shadowEvery: IS_MOBILE ? 12 : 6,
             artFx: SAFE_MODE ? 0 : 1, budgetMs: 21, capped30: false, memTight: false, memT: 0, now: 0, stats: { p10: 0, p50: 0, p90: 0 },
             sample(dt) {
                 this.now += dt;
@@ -4872,11 +4879,15 @@ canvas{touch-action:none}
             // dünya ile hizalı kalır; yalnız hızlı dönüşte kenarda çok kısa bir gecikme olur)
             // v4 · yansıma HER karede, kameranın o anki pozuyla çizilir (aralıklı çizim hareket halinde yansımayı titretiyordu).
             // Zayıf cihazlarda maliyet çözünürlük ve "hafif yansıma" (küçük yoğun nesneler yansımaya girmez) ile düşürülür.
+            // v27 · sahne ağacı (7 000+ nesne, güvercin kemikleri dahil) karede YALNIZ BİR KEZ güncellenir; yansıma, kırılma ve ana
+            // geçiş aynı matrisleri kullanır (önceden her geçiş ağacı baştan dolaşıyordu)
+            scene.updateMatrixWorld(); const _au = scene.autoUpdate; scene.autoUpdate = false;
             renderMirror();
             renderRefraction(camera);
             if (refr.on) underwaterOnly.forEach(o => o.visible = false);
             LG.render(camera);
             if (FOCUS.amount > 0.01 && !IS_MOBILE) renderFocus(); else renderer.render(scene, camera);
+            scene.autoUpdate = _au;
             LG.off();
             if (refr.on) underwaterOnly.forEach(o => o.visible = true);
             if (window.SU && SU.ready) SU.frame(deltaTime);
