@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#05080e">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>SU CITY · Deniz Şehri · v24</title>
+    <title>SU CITY · Deniz Şehri · v25</title>
     <style>
         html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
         canvas { display: block; touch-action: none; }
@@ -70,7 +70,7 @@ canvas{touch-action:none}
         const ART_NEAR_K = SAFE_MODE ? 3 : IS_MOBILE ? [6, 12, 16][Math.min(2, Q.tier)] : (Q.tier >= 3 ? 28 : 18);
         if (IS_MOBILE) { FEATURES.refraction = false; if (LOW_MEM) { FEATURES.shadows = false; FEATURES.fish = false; } }
         if (SAFE_MODE) { FEATURES.shadows = false; FEATURES.fish = false; FEATURES.seagulls = false; }
-        const MAX_PR = SAFE_MODE ? 1 : IS_MOBILE ? [1.25, 1.5, 1.75][Math.min(2, Q.tier)] : 2;
+        const MAX_PR = SAFE_MODE ? 1.25 : IS_MOBILE ? [1.75, 2, 2][Math.min(2, Q.tier)] : 2; // v25 · telefonda daha net
         // v3 · SU'rreal renk derecelendirmesi: ACES + çok hafif ayrık tonlama (gölgede derin çivit-petrol, ışıkta sıcak inci).
         // Ton eşleme aşamasına gömülüdür → ek geçiş yok, telefonda bedava. Eserler toneMapped:false olduğu için ona hiç dokunmaz.
         THREE.ShaderChunk.tonemapping_pars_fragment = THREE.ShaderChunk.tonemapping_pars_fragment.replace('vec3 CustomToneMapping( vec3 color ) { return color; }', `
@@ -86,7 +86,7 @@ canvas{touch-action:none}
         // ===================== ORİJİNAL KONTROL DEĞİŞKENLERİ =====================
         let scene, camera, renderer, car, keys = {}, carSpeed = 0, maxSpeed = 0.8, acceleration = 0.02;
         let deceleration = 0.01, turnSpeed = 0, maxTurnSpeed = 0.03, isMouseDown = false;
-        let mouseX = 0, mouseY = 0, cameraRadius = 150, cameraTheta = 0, cameraPhi = Math.PI / 6;
+        let mouseX = 0, mouseY = 0, cameraRadius = 150, cameraTheta = 0, cameraPhi = 1.1;
         let cameraMode = 0, cameraYaw = 0, cameraPitch = -0.1, cameraDistance = 20;
         let targetCameraPosition = new THREE.Vector3(), targetLookAt = new THREE.Vector3();
         let sphereBuildings = [], birdMixers = [];
@@ -528,13 +528,10 @@ canvas{touch-action:none}
                 float edge = rim4 * rim;
                 vec3 env = textureCube(uEnvA, reflect(-Vw, Nw)).rgb;
                 vec3 film = 0.5 + 0.5 * cos(6.2831853 * (vec3(0.0, 0.33, 0.67) + rim * 1.2 + 0.1));
-                vec3 add = env * mix(vec3(1.0), film * 1.25, 0.35) * edge * 0.32;
+                // v25 · eserler ışıktan bağımsız: çevre yansıması, güneş parıltısı, ıslaklık, kostik eklenmez → her cihazda, her
+                // saatte eserin orijinal rengi. (Yalnız keşif/koleksiyon/uyanış durum ışıkları kalır.)
+                vec3 add = vec3(0.0);
                 float hW = vCutW.y;
-                float wet = 1.0 - smoothstep(0.0, 1.6, hW);
-                float sunSp = pow(max(dot(Nw, normalize(uSunA + Vw)), 0.0), 220.0) * uSunUp;
-                add += env * (0.05 + 0.25 * edge) * wet + sqrt(uSunColA) * sunSp * (0.1 + 0.5 * wet);
-                float cz = artCaustic(vCutW.xz * 0.9 + vec2(vCutW.y * 0.6, -vCutW.y * 0.4), uTimeA * 0.9);
-                add += sqrt(uSunColA) * cz * (1.0 - smoothstep(0.2, 5.5, hW)) * step(-0.3, hW) * uSunUp * 0.07;
                 float y01 = (vCutW.y - (${BASE_Y.toFixed(3)})) / Hb;
                 float n = qn(vec2(vCutW.x * 0.31 + vCutW.z * 0.27, vCutW.y * 0.18 - uTimeA * 0.2)) * 0.6 + qn(vCutW.xz * 0.9 + vCutW.y * 0.3) * 0.4;
                 float breathe = 0.5 + 0.5 * sin(uTimeA * 1.1 + vBid * 1.7);
@@ -2371,7 +2368,7 @@ canvas{touch-action:none}
                 if (add > 1e-5) { gMin = min(gMin, sc.x); gMax = max(gMax, sc.x); }
                 hn = max(hn, 0.0);
                 if (gM0 < 0.5 || hn < 1e-4) { gl_FragColor = vec4(0.0); return; }
-                vec3 c = (gMax - gMin) > 1.2 ? gBestC : acc / hn; // v20 · yalnız ardışık dökümler karışır
+                vec3 c = (gMax - gMin) > 1.2 ? ((gH0 > gBest * 0.75 && gH0 > 0.02) ? gC0 : gBestC) : acc / hn; // v25 · sınırda kendi rengini korur: kare kare değişip yanıp sönmez // v20 · yalnız ardışık dökümler karışır
                 gl_FragColor = vec4(c * hn, hn);
             }`;
         // yardımcı alan: r = yaş (sn), g = döküm tohumu (hücre kimliği), ba = akışla biriken yer değiştirme (m) → hücreler boyaya yapışık
@@ -2511,19 +2508,19 @@ canvas{touch-action:none}
                 float wake = uSpS * exp(-rr / 5.5) * smoothstep(0.6, 2.0, rr);
                 float ring = sin(rr * 2.3 - uTime * 5.0) * wake;
                 vec2 rdir = rp / rr;
-                vec2 tuv = (vW.xz + drift * 1.4 + rdir * ring * 0.35) / vec2(uTexM, uTexM * 1.2383); // birikmiş akış kayması dokuya uygulanmaz → desen küçülmez/çizgilenmez
+                vec2 tuv = (vW.xz + drift * 0.35 + rdir * ring * 0.3) / vec2(uTexM, uTexM * 1.2383); // birikmiş akış kayması dokuya uygulanmaz → desen küçülmez/çizgilenmez
                 float L = texture2D(uDTex, tuv).r;
                 float tdx = uDTexel.x * 1.5, tdy = uDTexel.y * 1.5;
                 float Lx = texture2D(uDTex, tuv + vec2(tdx, 0.0)).r - texture2D(uDTex, tuv - vec2(tdx, 0.0)).r;
                 float Ly = texture2D(uDTex, tuv + vec2(0.0, tdy)).r - texture2D(uDTex, tuv - vec2(0.0, tdy)).r;
                 vec2 dmap = vec2(L - 0.5, texture2D(uDTex, tuv * 0.5 + 0.37).r - 0.5) * 2.0;
                 vec2 off = ((dmap * uDispS + vec2(Lx, Ly) * uDispG * nearD) * grow + drift) * kk;
-                float shift = clamp((0.5 - L) * uDispC, -0.9, 0.9) * grow * mix(0.35, 1.0, nearD);
+                float shift = clamp((0.5 - L) * uDispC, -0.6, 0.6) * grow * mix(0.35, 1.0, nearD);
                 // renk uzayında çift doğrusal: 4 teksel → 4 palet rengi → harmanla
                 vec2 tp = (uv + off) * uN - 0.5; vec2 tb = floor(tp), tw = tp - tb;
                 float ia = idxOf(texture2D(uS, (tb + vec2(0.5, 0.5)) / uN), u0), ib = idxOf(texture2D(uS, (tb + vec2(1.5, 0.5)) / uN), ia);
                 float ic = idxOf(texture2D(uS, (tb + vec2(0.5, 1.5)) / uN), ia), id = idxOf(texture2D(uS, (tb + vec2(1.5, 1.5)) / uN), ia);
-                float sf = 0.22;
+                float sf = 0.42;
                 vec3 col = mix(mix(palC(ia + shift, sf), palC(ib + shift, sf), tw.x), mix(palC(ic + shift, sf), palC(id + shift, sf), tw.x), tw.y);
                 // doku hacmi: renkleri karartmadan hücre kubbeleri ve duvar oyukları
                 col *= mix(1.0, mix(0.82, 1.1, smoothstep(0.08, 0.85, L)), grow * mix(0.5, 1.0, nearD));
@@ -2554,9 +2551,9 @@ canvas{touch-action:none}
                 vec3 env = textureCube(uEnv, reflect(-V, N)).rgb;
                 vec3 Hh = normalize(uSun + V);
                 float nh = max(dot(N, Hh), 0.0);
-                float spec = (pow(nh, 900.0) * 1.3 + pow(nh, 70.0) * 0.05) * (1.0 - uNight) * step(0.0, uSun.y);
+                float spec = 0.0; // v25 · boyada sarı güneş parıltısı yok
                 float men = smoothstep(0.0, 0.02, val) * (1.0 - smoothstep(0.02, 0.07, val));
-                vec3 outc = base * (1.0 - F * 0.2) + env * F * 0.16 + uSunCol * spec + vec3(1.0) * men * 0.1 * (1.0 - 0.7 * uNight);
+                vec3 outc = base * (1.0 - F * 0.12) + env * F * 0.1 + uSunCol * spec + vec3(1.0) * men * 0.1 * (1.0 - 0.7 * uNight);
                 gl_FragColor = vec4(min(outc, vec3(1.0)), cov);
             }`;
         const FLOW_STREAM_VS = `uniform float uTime; uniform float uLen; uniform float uR; varying vec3 vN; varying vec3 vW; varying float vY;
@@ -2656,14 +2653,14 @@ canvas{touch-action:none}
                 this.mat.uniforms.uPal = { value: this.palTex }; this.mat.uniforms.uPalN = { value: this.palN }; this.mat.uniforms.uPalHi = { value: 1 };
                 // yer değiştirme haritası: sanatçının akrilik dokusu (eser değil; yalnız boya için)
                 const dt = new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1, THREE.RGBAFormat); dt.needsUpdate = true;
-                Object.assign(this.mat.uniforms, { uSpP: { value: new THREE.Vector2(1e5, 1e5) }, uSpS: { value: 0 }, uN: { value: this.N }, uDTex: { value: dt }, uDTexel: { value: new THREE.Vector2(1 / 1179, 1 / 1460) }, uTexM: { value: 13.0 }, uDispS: { value: 4.0 }, uDispG: { value: 6.0 }, uDispC: { value: 1.5 } });
+                Object.assign(this.mat.uniforms, { uSpP: { value: new THREE.Vector2(1e5, 1e5) }, uSpS: { value: 0 }, uN: { value: this.N }, uDTex: { value: dt }, uDTexel: { value: new THREE.Vector2(1 / 1179, 1 / 1460) }, uTexM: { value: 17.0 }, uDispS: { value: 4.0 }, uDispG: { value: 6.0 }, uDispC: { value: 1.5 } });
                 new THREE.TextureLoader().setCrossOrigin('anonymous').load(DISP_TEX_URL, t => {
                     t.wrapS = t.wrapT = THREE.MirroredRepeatWrapping; t.anisotropy = renderer.capabilities.getMaxAnisotropy();
                     t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter;
                     this.mat.uniforms.uDTex.value = t;
                     if (t.image && t.image.width) this.mat.uniforms.uDTexel.value.set(1 / t.image.width, 1 / t.image.height);
                     // doku oranı korunur (1179×1460): bir döşeme ≈ 13 m × 16 m
-                    this.mat.uniforms.uTexM.value = 13.0;
+                    this.mat.uniforms.uTexM.value = 17.0;
                 }, undefined, () => console.warn('Akış dokusu yüklenemedi; düz döküm kullanılıyor.'));
                 try { localStorage.removeItem('sucity.paint.v6'); localStorage.removeItem('sucity.paint.v5'); } catch (e) {}
                 // v13 · akış her açılışta sıfırdan başlar: önceki oturumun boyası yüklenmez, kaydedilmez
@@ -3061,10 +3058,10 @@ canvas{touch-action:none}
                 env = mix(env, mix(uFogColor * 1.05, env, smoothstep(-0.02, 0.32, R.y)), far * 0.85);
                 float ang = atan(Nv.y, Nv.x);
                 float glare = pow(abs(cos(ang - 2.356)), 14.0) * smoothstep(0.25, 0.9, bezel);
-                vec3 glareCol = mix(vec3(1.0, 0.98, 0.94), uSunCol, 0.25);
+                vec3 glareCol = vec3(0.95, 0.97, 1.0);
                 vec3 disp = 0.5 + 0.5 * cos(6.2831 * (bezel * 1.4 + ang * 0.16 + vec3(0.0, 0.33, 0.67)));
                 vec3 H = normalize(uSun + V);
-                float sunSp = pow(max(dot(N, H), 0.0), 600.0) * 3.0 * (1.0 - uNight) * step(0.0, uSun.y);
+                float sunSp = 0.0; // v25 · cam yolda sarı güneş parıltısı yok
                 vec3 col = env * F + uTint * (0.025 + uFrost * 0.06) + disp * bezel * 0.04 + glareCol * glare * uGlare * (0.7 - 0.4 * uNight) + uSunCol * sunSp;
                 float a = clamp(uTintA * 0.8 + uFrost * 0.35 + F * 0.55 + bezel * 0.28, 0.06, 0.92);
                 float fogF = 1.0 - exp(-uFogD * uFogD * vFogDepth * vFogDepth);
@@ -4218,7 +4215,9 @@ canvas{touch-action:none}
                 CAMCTL.lookYaw = Math.max(-1.4, Math.min(1.4, CAMCTL.lookYaw - deltaX * 0.004));
                 CAMCTL.lookPitch = Math.max(-0.45, Math.min(0.3, CAMCTL.lookPitch + deltaY * 0.003));
             } else if (cameraMode === 2) {
-                cameraTheta -= deltaX * 0.006;
+                // v25 · kuş bakışı serbest: yatay sürükleme etrafında döner, dikey sürükleme açıyı değiştirir (yandan → tam tepeden)
+                cameraTheta -= deltaX * (IS_MOBILE ? 0.007 : 0.006);
+                cameraPhi = Math.max(0.12, Math.min(1.555, cameraPhi + deltaY * 0.005));
             }
         }
         function zoomBy(deltaY) {
@@ -4229,7 +4228,7 @@ canvas{touch-action:none}
                 camera.updateProjectionMatrix();
             }
             if (cameraMode === 0 || cameraMode === 3) { cameraDistance = Math.max(4, Math.min(42, cameraDistance * Math.pow(1.0012, deltaY))); CAM.distT = cameraDistance; }
-            else if (cameraMode === 2) cameraRadius = Math.max(40, Math.min(1300, cameraRadius * Math.pow(1.0015, deltaY)));
+            else if (cameraMode === 2) cameraRadius = Math.max(3, Math.min(1300, cameraRadius * Math.pow(1.0018, deltaY))); // v25 · istediğin kadar yakın
         }
         function setupControls() {
             document.addEventListener('keydown', (event) => {
@@ -4623,7 +4622,10 @@ canvas{touch-action:none}
                 targetLookAt.copy(targetCameraPosition).addScaledVector(_cd, 60);
                 CAM.yaw = CAM.yawT = car.rotation.y;
             } else {
-                targetCameraPosition.set(car.position.x, car.position.y + Math.max(40, cameraRadius), car.position.z);
+                // v25 · kuş bakışı yörünge: açı (cameraPhi) ve yakınlık (cameraRadius) serbest
+                const ba = cameraTheta, bp = cameraPhi, br = cameraRadius;
+                targetCameraPosition.set(car.position.x + Math.sin(ba) * Math.cos(bp) * br, car.position.y + Math.sin(bp) * br, car.position.z + Math.cos(ba) * Math.cos(bp) * br);
+                targetCameraPosition.y = Math.max(targetCameraPosition.y, WATER_Y + 0.8);
                 targetLookAt.copy(car.position);
                 CAM.yaw = CAM.yawT = car.rotation.y;
             }
@@ -4647,11 +4649,12 @@ canvas{touch-action:none}
                 smoothDampV(CAM.look, targetLookAt, CAM.lookV, 0.05, dt);
                 camera.up.set(0, 1, 0); CAMCTL.up.set(0, 1, 0);
             } else {
-                smoothDampV(camera.position, targetCameraPosition, CAMCTL.vPos, 0.2, dt);
-                const a = car.rotation.y + cameraTheta; _cf.set(-Math.sin(a), 0, -Math.cos(a));
-                CAMCTL.up.lerp(_cf, Math.min(1, dt * 5)).normalize(); camera.up.copy(CAMCTL.up);
-                camera.position.x += (car.position.x - camera.position.x) * Math.min(1, dt * 10); camera.position.z += (car.position.z - camera.position.z) * Math.min(1, dt * 10);
-                CAM.look.set(camera.position.x, car.position.y, camera.position.z);
+                smoothDampV(camera.position, targetCameraPosition, CAMCTL.vPos, 0.12, dt);
+                smoothDampV(CAM.look, targetLookAt, CAM.lookV, 0.06, dt);
+                // tam tepeden bakarken ekranın üstü bakılan yön olur (dönme serbest kalır)
+                _cf.set(-Math.sin(cameraTheta), 0, -Math.cos(cameraTheta));
+                const topK = Math.max(0, Math.min(1, (cameraPhi - 1.3) / 0.25));
+                CAMCTL.up.set(0, 1, 0).lerp(_cf, topK).normalize(); camera.up.copy(CAMCTL.up);
             }
             camera.lookAt(CAM.look); CAM_LERP.look.copy(CAM.look);
             // mod / devir geçişi: başlangıç pozundan hedef poza pürüzsüz harmanlama
