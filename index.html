@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#05080e">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>SU CITY · Deniz Şehri · v25</title>
+    <title>SU CITY · Deniz Şehri · v26</title>
     <style>
         html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
         canvas { display: block; touch-action: none; }
@@ -3513,6 +3513,7 @@ canvas{touch-action:none}
         }
         const _mDir = new THREE.Vector3(), _mUp = new THREE.Vector3(), _mTarget = new THREE.Vector3();
         const _mPlane = new THREE.Plane(), _mN = new THREE.Vector3(), _mClip = new THREE.Vector4(), _mQ = new THREE.Vector4();
+        const _mHid = [];
         function renderMirror(cam) {
             cam = cam || camera;
             mirror.drawn = cam === camera;
@@ -3537,10 +3538,15 @@ canvas{touch-action:none}
               mc.projectionMatrixInverse.copy(mc.projectionMatrix).invert(); }
             hiddenInMirror.forEach(o => o.visible = false);
             if (GOV.mirrorLite) MIRROR_LITE.forEach(o => { o.userData._mv = o.visible; o.visible = false; });
+            // v26 · yansıma geçişinde uzak binalar çizilmez: su yansıması uzakta zaten sis ve Fresnel ile kaybolur, görüntü aynı kalır,
+            // yansıma maliyeti (ana sahne kadar ağırdı) büyük ölçüde düşer
+            const mR2 = (IS_MOBILE ? 240 : 380) ** 2 * (GOV.mirrorLite ? 0.6 : 1), mHid = _mHid; mHid.length = 0;
+            for (let i = 0; i < BUILDINGS.length; i++) { const m = BUILDINGS[i].mesh; if (m.visible && m.position.distanceToSquared(cp) > mR2) { m.visible = false; mHid.push(m); } }
             renderer.setRenderTarget(mirror.rt);
             renderer.clear();
             renderer.render(scene, mc);
             renderer.setRenderTarget(null);
+            for (let i = 0; i < mHid.length; i++) mHid[i].visible = true;
             hiddenInMirror.forEach(o => o.visible = true);
             if (GOV.mirrorLite) MIRROR_LITE.forEach(o => { o.visible = o.userData._mv; });
         }
