@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#05080e">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>SU CITY · Deniz Şehri · v27</title>
+    <title>SU CITY · Deniz Şehri · v28</title>
     <style>
         html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
         canvas { display: block; touch-action: none; }
@@ -269,6 +269,10 @@ canvas{touch-action:none}
                 // ufkun altı: gökyüzü değil, denizden yansıyan koyu ortam (yansımalar ve ortam ışığı sararmasın)
                 vec3 below = uZenith * vec3(0.16, 0.24, 0.28) + twilight(vec3(rd.x, 0.0, rd.z), uSunDir) * 0.3 + vec3(0.001, 0.002, 0.004) * uNight;
                 col = mix(col, below, smoothstep(0.0, -0.07, d.y));
+                // v28 · güneş çevresinde yumuşak Mie halesi (sinematik, ucuz) + ince titreşim (gökyüzünde renk bantlaşması yok)
+                float sunHalo = (pow(max(mu, 0.0), 48.0) * 0.12 + pow(max(mu, 0.0), 6.0) * 0.025) * smoothstep(-0.04, 0.05, uSunDir.y) * (1.0 - uNight);
+                col += uSunCol * sunHalo;
+                col += (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
                 gl_FragColor = vec4(col, 1.0);
                 #include <tonemapping_fragment>
                 #include <encodings_fragment>
@@ -832,10 +836,15 @@ canvas{touch-action:none}
             glaze('sand', { color: 0xd6c3a2, roughness: 0.42, clearcoat: 0.4, clearcoatRoughness: 0.25 });
             glaze('teal', { color: 0x2b666a, roughness: 0.28, clearcoat: 0.9, clearcoatRoughness: 0.08, envMapIntensity: 1.1 });
             glaze('graphite', { color: 0x292c31, roughness: 0.32, metalness: 0.25, clearcoat: 0.7, clearcoatRoughness: 0.1 });
-            MAT.chrome = new THREE.MeshStandardMaterial({ color: 0xe0e3e8, metalness: 1, roughness: 0.1, envMapIntensity: 1.25 });
-            MAT.irid = iridescent(new THREE.MeshStandardMaterial({ color: 0xd8dce2, metalness: 1, roughness: 0.08, envMapIntensity: 1.3 }), 0.75, 'c');
-            MAT.iridDS = iridescent(new THREE.MeshStandardMaterial({ color: 0xd8dce2, metalness: 1, roughness: 0.08, envMapIntensity: 1.3, side: THREE.DoubleSide }), 0.75, 'cds');
-            MAT.champagne = new THREE.MeshStandardMaterial({ color: 0xc8ae86, metalness: 1, roughness: 0.24 });
+            // v28 · krom mikro yüzeyi: çok ince fırçalanmış pürüzlülük haritası → yansıma yer yer yumuşar, plastik gibi değil metal gibi
+            const MICRO = (() => { const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d'); g.fillStyle = '#b4b4b4'; g.fillRect(0, 0, 256, 256);
+                for (let i = 0; i < 900; i++) { const y = Math.random() * 256, v = 120 + Math.random() * 135 | 0; g.strokeStyle = `rgba(${v},${v},${v},${0.05 + Math.random() * 0.12})`; g.lineWidth = 0.5 + Math.random() * 1.2; g.beginPath(); g.moveTo(0, y); g.lineTo(256, y + (Math.random() - 0.5) * 6); g.stroke(); }
+                for (let i = 0; i < 2600; i++) { const v = 90 + Math.random() * 165 | 0; g.fillStyle = `rgba(${v},${v},${v},0.08)`; g.fillRect(Math.random() * 256, Math.random() * 256, 1, 1); }
+                const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(3, 3); return t; })();
+            MAT.chrome = new THREE.MeshStandardMaterial({ color: 0xe9ebef, metalness: 1, roughness: 0.16, roughnessMap: MICRO, envMapIntensity: 1.3 });
+            MAT.irid = iridescent(new THREE.MeshStandardMaterial({ color: 0xd8dce2, metalness: 1, roughness: 0.13, roughnessMap: MICRO, envMapIntensity: 1.3 }), 0.75, 'c');
+            MAT.iridDS = iridescent(new THREE.MeshStandardMaterial({ color: 0xd8dce2, metalness: 1, roughness: 0.13, roughnessMap: MICRO, envMapIntensity: 1.3, side: THREE.DoubleSide }), 0.75, 'cds');
+            MAT.champagne = new THREE.MeshStandardMaterial({ color: 0xcdb48c, metalness: 1, roughness: 0.32, roughnessMap: MICRO });
             // Gerçek zamanlı yansıma: şehrin kendisi (eserlerin renkleri, gökyüzü, bulutlar) küp haritaya çizilir ve cam / ayna yüzeylere yansır.
             LIVE_ENV.init();
             const liveEnv = LIVE_ENV.front.texture;
@@ -1196,7 +1205,9 @@ canvas{touch-action:none}
             const exposure = 0.8 + 0.55 * night;
             renderer.toneMappingExposure = exposure;
             const hd = acesJS(hor, exposure).map(toSRGB);
-            scene.fog.color.setRGB(hd[0], hd[1], hd[2]); scene.fog.density = 0.00022 + 0.00006 * night;
+            // v28 · günün saatine göre pus: sabah ve altın saatte daha yoğun ve sıcak, öğlen berrak (derinlik hissi, maliyetsiz)
+            const golden = sstep(28, 3, elDeg) * sunUp;
+            scene.fog.color.setRGB(hd[0], hd[1], hd[2]); scene.fog.density = 0.00020 + 0.00016 * golden + 0.00006 * night;
             if (ocean) {
                 const o = ocean.material.uniforms;
                 o.uFogColor.value.setRGB(hor[0], hor[1], hor[2]); o.uFogDensity.value = scene.fog.density;
@@ -3069,8 +3080,10 @@ canvas{touch-action:none}
                 vec3 disp = 0.5 + 0.5 * cos(6.2831 * (bezel * 1.4 + ang * 0.16 + vec3(0.0, 0.33, 0.67)));
                 vec3 H = normalize(uSun + V);
                 float sunSp = 0.0; // v25 · cam yolda sarı güneş parıltısı yok
-                vec3 col = env * F + uTint * (0.025 + uFrost * 0.06) + disp * bezel * 0.04 + glareCol * glare * uGlare * (0.7 - 0.4 * uNight) + uSunCol * sunSp;
-                float a = clamp(uTintA * 0.8 + uFrost * 0.35 + F * 0.55 + bezel * 0.28, 0.06, 0.92);
+                // v28 · gerçek kalın cam: kenara doğru içinden geçen yol uzar → hafif yeşil-turkuaz kenar tonu (soda-kireç camı)
+                vec3 edgeTint = vec3(0.62, 0.86, 0.80) * pow(bezel, 2.2) * 0.07;
+                vec3 col = env * F + uTint * (0.025 + uFrost * 0.06) + disp * bezel * 0.04 + edgeTint + glareCol * glare * uGlare * (0.7 - 0.4 * uNight) + uSunCol * sunSp;
+                float a = clamp(uTintA * 0.8 + uFrost * 0.35 + F * 0.55 + bezel * 0.32, 0.06, 0.92);
                 float fogF = 1.0 - exp(-uFogD * uFogD * vFogDepth * vFogDepth);
                 col = mix(col, uFogColor * a, fogF);
                 gl_FragColor = vec4(col, a);
